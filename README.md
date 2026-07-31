@@ -378,6 +378,41 @@ loop never waits on the model, and the model never drives a frame.
 The face is Susan Kare grammar — dot eyes, an L-shaped nose, one mouth stroke, no outline.
 The restraint is the point; detail makes it read as a cartoon rather than a thing.
 
+## Live deployment
+
+**https://46-62-224-92.sslip.io**
+
+HTTPS is not optional here. `getUserMedia` only grants camera and microphone on a secure
+origin, so a plain `http://<ip>:<port>` loads fine and then silently never gets permission —
+the demo appears broken for a reason that has nothing to do with the code. The hostname is
+`sslip.io` wildcard DNS (resolves straight to the IP, no DNS records to manage), which lets
+Let's Encrypt issue a real cert with no domain purchase.
+
+```
+browser ──https/wss──▶ nginx :443 (BT-Panel) ──▶ uvicorn 127.0.0.1:8100 ──▶ Gemini Live
+```
+
+| Piece | Where |
+|---|---|
+| Code | `/opt/living-objects` (git pull to update) |
+| venv | `/opt/living-objects/.venv` |
+| Secrets | `/opt/living-objects/.env`, `600 root:root`, scp'd — never in git |
+| Service | `systemctl {status,restart} living-objects` — enabled, `Restart=always` |
+| Vhost | `/www/server/panel/vhost/nginx/anima.conf` |
+| Cert | Let's Encrypt, auto-renewing |
+
+Redeploy:
+```bash
+ssh root@46.62.224.92 'cd /opt/living-objects && git pull && systemctl restart living-objects'
+```
+
+Two things the proxy config gets right that a default one wouldn't: `Upgrade`/`Connection`
+headers (without them `/ws` never establishes and the app is mute), and
+`proxy_read_timeout 3600s` (the default 60s severs a conversation mid-sentence).
+
+> **This URL is public and unauthenticated.** Anyone who has it can open a session against
+> your billed API key. Fine for a demo; add nginx basic auth before leaving it up.
+
 ## Roadmap
 
 - Persistent memory and an episodic log, so the object remembers what it saw from where it sits

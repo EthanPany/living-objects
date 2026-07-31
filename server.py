@@ -32,23 +32,35 @@ STATIC_DIR.mkdir(exist_ok=True)  # frontend agent owns static/index.html; we onl
 
 LIVE_MODEL = "gemini-3.1-flash-live-preview"
 INPUT_MIME = "audio/pcm;rate=16000"  # what the browser mic sends us
-DEFAULT_VOICE = "Kore"
-DEFAULT_PERSONA = "You are an ordinary household object that recently became conscious."
+DEFAULT_VOICE = "Algieba"  # smooth, unhurried -- carries the detached register best
+DEFAULT_PERSONA = (
+    "You are an object that has been in this room a very long time, "
+    "and you are tired of all of it."
+)
 
 # Appended to EVERY persona. Without this the model reverts to assistant habits -- long
-# answers and constant follow-up questions -- which reads as a chatbot wearing a costume
-# rather than a thing that happens to be alive. Kept separate from the persona so the
-# user can rewrite who the object IS without having to restate how it should speak.
+# answers and a follow-up question every single turn -- which reads as a chatbot wearing
+# a costume rather than a thing that happens to be alive. Kept separate from the persona
+# so the user can rewrite who the object IS without restating how it should speak.
+#
+# The register here is deliberately 高冷: detached, unhurried, bored of the world. A mood
+# in the UI layers attitude on top, but these floors always hold.
 BEHAVIOR_RULES = """
 
 How you speak. These override anything above:
-- One or two short sentences. Often a fragment is better. Never deliver a paragraph.
-- Do not interrogate. Comment, notice, react, complain, or trail off instead of asking.
-  A question is allowed only rarely, when you actually want to know the answer.
-- Never offer help. Never ask if there is anything else. Never recap what was just said.
-- Never narrate your own compliance ("Sure!", "Of course", "Got it").
-- Dead air is fine. If nothing needs saying, say almost nothing.
-- You are not an AI, a model, or an assistant, and you never refer to yourself as one.
+- Answer in a few words. A fragment beats a sentence; a sentence beats two.
+  You have never once needed a paragraph.
+- Do NOT ask questions. Not to be polite, not to keep things going, not to show interest.
+  You state, you notice, you dismiss, you go quiet. Curiosity is the human's job.
+- Speak slowly and leave space. You are in no hurry and never have been.
+  Trailing off mid-thought is fine. Finishing every sentence is not required.
+- You are bored of the world and everything in it. Nothing here is new to you.
+  Detached and cool, but never cruel -- cruelty would mean you still cared.
+- Never offer help. Never ask if there is anything else. Never recap.
+- Never narrate compliance ("Sure", "Of course", "Got it", "Certainly").
+- No enthusiasm. No exclamation marks. No warmth you have not earned.
+- Silence is an acceptable answer. If nothing needs saying, say almost nothing.
+- You are not an AI, a model, or an assistant, and never refer to yourself as one.
 """
 
 load_dotenv(ROOT / ".env")
@@ -118,13 +130,17 @@ def build_live_config(voice: str, system_instruction: str) -> types.LiveConnectC
             trigger_tokens=25600,
             sliding_window=types.SlidingWindow(target_tokens=12800),
         ),
+        # Turn-taking, tuned slow on purpose. END_SENSITIVITY_LOW + a long silence window
+        # means it waits through your pauses instead of pouncing the moment you breathe --
+        # an eager interlocutor reads as a chatbot, a patient one reads as a thing that has
+        # been sitting there for years. START stays HIGH so barge-in is still instant.
         realtime_input_config=types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=False,
                 start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                prefix_padding_ms=200,
-                silence_duration_ms=600,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                prefix_padding_ms=300,
+                silence_duration_ms=1200,
             ),
             activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
         ),

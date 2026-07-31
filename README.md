@@ -24,14 +24,31 @@ cp .env.example .env
 ```
 
 Get a key at **[aistudio.google.com/apikey](https://aistudio.google.com/apikey)**.
+Paste it bare — no quotes, no spaces around the `=`.
 
 `.env` is gitignored. Never commit it.
+
+<details>
+<summary>If pip refuses with "externally-managed-environment"</summary>
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Then use `python` in place of `python3` below, and re-run `source .venv/bin/activate` in
+each new terminal.
+</details>
 
 ## Run
 
 ```bash
-uvicorn server:app --port 8000
+python3 -m uvicorn server:app --port 8000
 ```
+
+(`uvicorn server:app --port 8000` works too, if `uvicorn` is on your PATH. Add `--reload`
+while editing `server.py`.)
 
 Open **http://localhost:8000**, click **Connect**, allow the microphone, and talk.
 
@@ -40,11 +57,36 @@ still cause the model to hear itself and interrupt mid-sentence.
 
 ### Using the lab
 
-- **Voice dropdown** — all 30 prebuilt voices. Changing it reopens the session immediately.
+- **Mood dropdown 心情** — six temperaments. Picking one rewrites the persona box *and*
+  swaps to the voice that carries it. Edit the persona afterwards and the text wins — the
+  mood is a starting point, not a lock.
+
+  | Mood | Voice | Register |
+  |---|---|---|
+  | 高冷 · Weary *(default)* | Algieba | Bored of existence. Nothing is new. Detached, never cruel. |
+  | 毒舌 · Dry | Algenib | Deadpan, unimpressed, notices what you'd rather it didn't. |
+  | 温柔 · Gentle | Sulafat | Quietly fond of you. Patient. Doesn't fuss. |
+  | 阴森 · Ominous | Enceladus | Has seen something. Won't say what. |
+  | 哲学 · Philosophical | Charon | Years of nothing but thinking. States conclusions flatly. |
+  | 散漫 · Chill | Zubenelgenubi | No ambitions. Nothing has ever been urgent. |
+
+- **Voice dropdown** — all 30 prebuilt voices, listed as `Name — Character` (`Kore — Firm`,
+  `Puck — Upbeat`, …). The voice is fixed when the session opens and cannot change mid-call,
+  so picking a new one while connected automatically tears the session down and reopens it.
+  That's the flicker you see; it takes a moment and clears the conversation history.
 - **Persona box** — describe *who the object is*. How it speaks is enforced separately (see below).
+  Unlike the voice, persona edits do **not** auto-apply — the hint turns amber to remind you.
 - **Apply / Restart** — reopen the session with the current voice and persona.
-- **Transcript pane** — live transcription of both sides.
+- **Transcript pane** — live transcription of both sides. `YOU >` is what it actually heard,
+  which is the fastest way to tell whether your mic is being understood.
 - **Text box** — send a typed turn without speaking, useful for testing personas quickly.
+
+Mood, voice, and persona are remembered in `localStorage` between reloads.
+
+Turn-taking is deliberately slow: `END_SENSITIVITY_LOW` with a 1200 ms silence window, so it
+waits through your pauses instead of pouncing the moment you breathe. Barge-in stays instant
+(`START_SENSITIVITY_HIGH`) — you can always cut it off. If it feels *too* patient, drop
+`silence_duration_ms` in `server.py`.
 
 ## Audition all 30 voices offline
 
@@ -55,6 +97,13 @@ python3 preview_voices.py --text "I have seen things." --voices Algenib,Enceladu
 
 Writes `voice_samples/<Voice>.wav` (24 kHz mono PCM16). Select them all in Finder and press
 space to arrow through every voice in about a minute.
+
+Files that already exist are skipped, so re-running only fills in what's missing. Other
+flags: `--list` (print the catalog, no API key needed), `--overwrite`, `--out <dir>`,
+`--delay <seconds>` (default 1.2, spaces out calls to stay under free-tier rate limits).
+
+This uses the standalone TTS model (`gemini-2.5-flash-preview-tts`), not the Live model —
+it's for picking a voice, so expect one-shot narration rather than conversational delivery.
 
 Good starting points for inanimate objects: **Algenib** (gravelly), **Enceladus** (breathy),
 **Zubenelgenubi** (casual), **Gacrux** (mature), **Fenrir** (excitable).
@@ -109,6 +158,12 @@ persona freely; the behavior rules keep applying.
 - **Input + output transcription** — both sides of the conversation as text.
 - **Session resumption** — survives transient disconnects.
 
+Because the Live model is a **preview** model, `server.py` opens the session defensively: it
+tries the full config above, and if the model rejects any of those optional tuning fields it
+retries once with a minimal config (voice + persona + transcription only) rather than failing
+the connection. If you ever see `using minimal live config` in the server log, that's what
+happened — the app still works, minus the tuning above.
+
 ## Files
 
 | File | Purpose |
@@ -122,16 +177,65 @@ persona freely; the behavior rules keep applying.
 
 ## Troubleshooting
 
-**`GEMINI_API_KEY is not set`** — `cp .env.example .env`, add your key, restart the server.
+**`GEMINI_API_KEY is not set`** — there's no `.env`, or it has no key in it.
+`cp .env.example .env`, paste your key after `GEMINI_API_KEY=` (no quotes, no spaces around
+the `=`), and **restart the server**. Or skip the file entirely and
+`export GEMINI_API_KEY=...` before launching uvicorn.
 
-**Chipmunk or slow-motion audio** — sample rate mismatch. Capture must be 16000 Hz, playback
-24000 Hz.
+If you instead get **`API key not valid`**, the key exists but is wrong — you reached
+Google and it rejected you. Re-copy the whole key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey); truncation and a stray
+trailing newline are the usual culprits.
 
-**It interrupts itself constantly** — it's hearing its own voice. Use headphones. Confirm
-`echoCancellation: true` in the `getUserMedia` constraints.
+**Chipmunk (fast/high) or slow-motion (slow/low) audio** — sample rate mismatch. The
+contract is strict: **16000 Hz in, 24000 Hz out.** Chipmunk means audio is being played
+faster than it was recorded; slow-motion is the reverse.
 
-**No microphone prompt** — mic access requires a secure origin. `localhost` qualifies; a LAN
-IP does not. Use `localhost`, not `127.0.0.1:8000` via another machine.
+The usual cause is the browser refusing a 16 kHz capture context and silently handing back
+its native rate (44100 or 48000). The app detects this and shows a red banner naming the
+rate it actually got — if that banner is up, that's your bug. **Use Chrome**, which honors
+`new AudioContext({sampleRate:16000})`; Safari and some Firefox builds don't, and the app
+does not resample.
+
+If you've been editing code, check these three agree: `CAPTURE_RATE = 16000` and
+`PLAYBACK_RATE = 24000` in `static/index.html`, and `INPUT_MIME = "audio/pcm;rate=16000"`
+in `server.py`. The playback `AudioBuffer` must be built at 24000 regardless of what rate
+the output context reports.
+
+**It interrupts itself constantly** — it's hearing its own voice through your speakers,
+reading that as you barging in, and cutting itself off.
+
+**Put on headphones.** That fixes it instantly and completely.
+
+Without them you're relying on browser acoustic echo cancellation. It's already on
+(`echoCancellation: true`, plus `noiseSuppression` and `autoGainControl`, in the
+`getUserMedia` constraints in `static/index.html`), but AEC loses to loud speakers, an
+external USB mic, or a mic and speaker far apart. Lowering output volume helps. Note that
+being interruptible is the *feature* — the bug is only when it interrupts itself with
+nobody talking.
+
+**No microphone prompt / `getUserMedia` fails** — browsers only expose the mic on a secure
+context: `https://`, or `http://localhost`.
+
+- Open **http://localhost:8000**, not `127.0.0.1:8000`, and never by double-clicking
+  `static/index.html` — `file://` has no mic and no working WebSocket.
+- If you denied or dismissed the prompt once, the browser remembers. Click the icon at the
+  left of the address bar → Site settings → allow Microphone → reload.
+- On macOS also check System Settings → Privacy & Security → Microphone and confirm your
+  browser is listed and enabled.
+- A LAN IP (`http://192.168.x.x:8000`) will **not** get mic access. Use an HTTPS tunnel
+  such as ngrok if you need to demo from another machine.
+
+**`Connection closed (code 1006)` / WebSocket error banner** — the server isn't running or
+died; check the uvicorn terminal. If the port is taken, run on another one
+(`python3 -m uvicorn server:app --port 8001`) and open `http://localhost:8001`.
+
+**Voice dropdown says `(30 · builtin fallback)`** — `GET /voices` failed. Harmless, since
+the built-in list is identical, but it usually means the page was opened from `file://`
+rather than through the server.
+
+**It answers out loud but the transcript stays empty** — transcription is a separate stream
+from the audio and can lag or drop on preview models. If you hear audio, the session is fine.
 
 **It won't stop asking questions** — your persona is probably overriding `BEHAVIOR_RULES`.
 Remove any instruction to be curious or ask questions from the persona box.

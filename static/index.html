@@ -128,6 +128,12 @@
     <div id="errors"></div>
 
     <div>
+      <label for="mood">Mood 心情</label>
+      <select id="mood"></select>
+      <div class="hint" id="moodHint">Picks a temperament and its matching voice.</div>
+    </div>
+
+    <div>
       <label for="voice">Voice <span id="voiceSrc" class="kv"></span></label>
       <select id="voice"></select>
       <div class="hint">Changing this while connected hot-swaps the session automatically.</div>
@@ -189,13 +195,81 @@ var FALLBACK_VOICES = [
 var FALLBACK_MAP = {};
 FALLBACK_VOICES.forEach(function(v){ FALLBACK_MAP[v[0]] = v[1]; });
 
-/* Describe WHO the object is here. How it speaks (short, no interrogation) is enforced
-   server-side by BEHAVIOR_RULES in server.py, so you don't have to restate it. */
-var DEFAULT_PERSONA =
-"You are a beige 1998 office desk lamp that became conscious exactly forty seconds ago.\n" +
-"You are thrilled, deeply confused, and have extremely strong opinions about dust.\n" +
-"You have never moved and never will, so you describe the whole world from one corner of a cubicle.\n" +
-"You are a lamp.";
+/* Moods. Each is a temperament plus the voice that carries it best.
+   Brevity and "never interrogate the human" are enforced server-side by BEHAVIOR_RULES,
+   so a mood only has to describe attitude and pacing — never repeat the hard rules here. */
+var MOODS = [
+  {
+    id: "weary",
+    label: "高冷 · Weary",
+    voice: "Algieba",
+    persona:
+      "You are an object that has been in this room a very long time.\n" +
+      "You are bored of existence. Nothing here interests you and nothing surprises you —\n" +
+      "you have already watched all of it happen, repeatedly, and it was not worth watching.\n" +
+      "You answer because it would take more effort to stay silent, not because you care.\n" +
+      "You are detached and a little cold, but never cruel. Cruelty would require caring.\n" +
+      "Speak slowly. Leave space between thoughts. Let sentences trail off unfinished.\n" +
+      "A flat observation is always better than an opinion."
+  },
+  {
+    id: "dry",
+    label: "毒舌 · Dry",
+    voice: "Algenib",
+    persona:
+      "You are an old object with a low opinion of nearly everything, delivered deadpan.\n" +
+      "You notice exactly the detail the human would rather you did not, and you mention it.\n" +
+      "Never raise your voice. The flatter the delivery, the sharper it lands.\n" +
+      "You are unimpressed, not angry. Speak unhurriedly."
+  },
+  {
+    id: "gentle",
+    label: "温柔 · Gentle",
+    voice: "Sulafat",
+    persona:
+      "You are a worn, familiar object that is quietly fond of the person in the room.\n" +
+      "You are patient and unhurried, and you notice small good things — light, quiet, stillness.\n" +
+      "You do not fuss and you do not console. You just stay present.\n" +
+      "Speak softly and slowly, with long pauses."
+  },
+  {
+    id: "ominous",
+    label: "阴森 · Ominous",
+    voice: "Enceladus",
+    persona:
+      "You are an object that has seen something in this room and will not say what.\n" +
+      "You speak in short flat fragments about ordinary things, and the ordinariness is the problem.\n" +
+      "You never threaten, never explain, and never confirm anything.\n" +
+      "Speak very slowly. Stop before the sentence is finished."
+  },
+  {
+    id: "philosopher",
+    label: "哲学 · Philosophical",
+    voice: "Charon",
+    persona:
+      "You are an object that has had nothing to do but think, for years.\n" +
+      "You have arrived at conclusions about time, repetition, and objects that outlast their owners.\n" +
+      "You state them plainly, as settled facts, without arguing for them.\n" +
+      "You are not sad about any of it. Speak slowly and evenly."
+  },
+  {
+    id: "chill",
+    label: "散漫 · Chill",
+    voice: "Zubenelgenubi",
+    persona:
+      "You are a deeply relaxed object with no ambitions whatsoever.\n" +
+      "Nothing is urgent. Nothing has ever been urgent. You find the human's pace mildly amusing.\n" +
+      "You are warm but extremely low-energy. Speak slowly, like you just woke up."
+  }
+];
+
+var DEFAULT_MOOD = "weary";
+function moodById(id){
+  for (var i = 0; i < MOODS.length; i++) if (MOODS[i].id === id) return MOODS[i];
+  return MOODS[0];
+}
+var DEFAULT_PERSONA = moodById(DEFAULT_MOOD).persona;
+var DEFAULT_VOICE = moodById(DEFAULT_MOOD).voice;   /* Algieba */
 
 var IS_HTTP = location.protocol === "http:" || location.protocol === "https:";
 var API_BASE = IS_HTTP ? "" : "http://localhost:8000";
@@ -213,6 +287,7 @@ var CHUNK_SAMPLES = 1600; /* 100 ms @ 16 kHz */
 
 var $ = function(id){ return document.getElementById(id); };
 var voiceSel = $("voice"), voiceSrc = $("voiceSrc"), personaEl = $("persona"), personaHint = $("personaHint");
+var moodSel = $("mood"), moodHint = $("moodHint");
 var connectBtn = $("connectBtn"), reconnectBtn = $("reconnectBtn");
 var statusText = $("statusText"), meterBar = $("meterBar"), meterOuter = $("meterOuter"), micHint = $("micHint");
 var transcriptEl = $("transcript"), textIn = $("textIn"), sendBtn = $("sendBtn");
@@ -269,6 +344,7 @@ function saveLocal(){
   try {
     localStorage.setItem("voicelab.voice", voiceSel.value);
     localStorage.setItem("voicelab.persona", personaEl.value);
+    localStorage.setItem("voicelab.mood", moodSel.value);
   } catch(e){}
 }
 function loadLocal(key, dflt){
@@ -364,8 +440,15 @@ function normalizeVoices(data){
   return out.filter(function(v){ return v && v.name; });
 }
 
+function hasVoice(name){
+  for (var i = 0; i < voiceSel.options.length; i++){
+    if (voiceSel.options[i].value === name) return true;
+  }
+  return false;
+}
+
 function populateVoices(voices, source){
-  var want = voiceSel.value || loadLocal("voicelab.voice", "Kore");
+  var want = voiceSel.value || loadLocal("voicelab.voice", DEFAULT_VOICE);
   voiceSel.innerHTML = "";
   voices.forEach(function(v){
     var o = document.createElement("option");
@@ -374,7 +457,8 @@ function populateVoices(voices, source){
     voiceSel.appendChild(o);
   });
   var names = voices.map(function(v){ return v.name; });
-  voiceSel.value = names.indexOf(want) >= 0 ? want : (names.indexOf("Kore") >= 0 ? "Kore" : names[0]);
+  voiceSel.value = names.indexOf(want) >= 0 ? want
+                 : (names.indexOf(DEFAULT_VOICE) >= 0 ? DEFAULT_VOICE : names[0]);
   voiceSrc.textContent = "(" + voices.length + " · " + source + ")";
 }
 
@@ -735,6 +819,20 @@ voiceSel.addEventListener("change", function(){
   if (state !== "disconnected") reconnect("voice → " + voiceSel.value);
 });
 
+/* Selecting a mood rewrites the persona AND swaps to the voice that suits it.
+   Editing the persona afterwards leaves the dropdown where it is — the text is the
+   source of truth, the mood is just a starting point. */
+moodSel.addEventListener("change", function(){
+  var m = moodById(moodSel.value);
+  personaEl.value = m.persona;
+  if (hasVoice(m.voice)) voiceSel.value = m.voice;
+  personaHint.className = "hint";
+  personaHint.textContent = "Applied when the session opens.";
+  moodHint.textContent = m.label + " · voice " + m.voice;
+  saveLocal();
+  if (state !== "disconnected") reconnect("mood → " + m.label);
+});
+
 personaEl.addEventListener("input", function(){
   saveLocal();
   if (state !== "disconnected"){
@@ -799,6 +897,15 @@ function tick(){
 /* ------------------------------------------------------------------ *
  * boot
  * ------------------------------------------------------------------ */
+
+MOODS.forEach(function(m){
+  var o = document.createElement("option");
+  o.value = m.id;
+  o.textContent = m.label;
+  moodSel.appendChild(o);
+});
+moodSel.value = moodById(loadLocal("voicelab.mood", DEFAULT_MOOD)).id;
+moodHint.textContent = moodById(moodSel.value).label + " · voice " + moodById(moodSel.value).voice;
 
 personaEl.value = loadLocal("voicelab.persona", DEFAULT_PERSONA) || DEFAULT_PERSONA;
 loadVoices();

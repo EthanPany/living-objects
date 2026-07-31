@@ -79,10 +79,10 @@ still cause the model to hear itself and interrupt mid-sentence.
 - **Apply / Restart** — reopen the session with the current voice and persona.
 - **Transcript pane** — live transcription of both sides. `YOU >` is what it actually heard,
   which is the fastest way to tell whether your mic is being understood.
-- **Camera 摄像头** — off by default. Tick it and the object can *see*: webcam frames go to
-  Gemini at 1 fps, downscaled to 512px, and it will comment on what's in front of it.
-  Toggling mid-call reopens the session, same as changing voice. A denied or missing camera
-  degrades to audio rather than killing the session.
+- **Camera 摄像头** — always on, no toggle. Seeing the room is the point, not a feature.
+  Webcam frames go to Gemini at 1 fps, downscaled to 512px. A blocked camera still leaves
+  audio running, but it's an error state rather than a supported mode — the object will
+  tell you it can't see.
 - **Text box** — send a typed turn without speaking, useful for testing personas quickly.
 
 Mood, voice, and persona are remembered in `localStorage` between reloads.
@@ -169,12 +169,27 @@ and volume separately instead of just saying "sound bored."
 
 ### Video
 
-Off by default; tick **Camera** to enable. Frames are captured to an offscreen canvas,
-downscaled to 512px on the longest edge, JPEG-encoded at q0.6, and sent as base64 inside
-**text** frames — the binary channel stays unambiguously audio, and at 1 fps the ~33%
-base64 overhead is noise next to the round trip.
+Always on. Frames are captured to an offscreen canvas, downscaled to 512px on the longest
+edge, JPEG-encoded at q0.6, and sent as base64 inside **text** frames — the binary channel
+stays unambiguously audio, and at 1 fps the ~33% base64 overhead is noise next to the
+round trip.
 
 **1 fps is the API ceiling, not a tuning choice.** Don't raise `CAM_FPS`.
+
+Two things make vision actually work, and both were bugs first:
+
+**Gate frames on `readyForAudio`, not on `state`.** `state` cycles
+`ready → listening → speaking`, so gating on `state === "ready"` silently dropped every
+frame while either party was talking — precisely when the model needs to see. It answered
+blind and invented plausible contents. The symptom looks like hallucination; the cause is
+an empty visual context.
+
+**Tell it not to guess.** Even with frames arriving, nothing in the prompt required
+grounding, so a persona built around being bored of everything happily made things up.
+`BEHAVIOR_RULES` now has a *What you see* block: describe only what's actually visible,
+say so plainly when the view is dark or unclear, never call it "the image" (it's the
+object's own eyesight, not a file it was handed), and explicitly — being bored of the
+world doesn't license inventing it.
 
 That ceiling is convenient rather than limiting: it means a vision model can never drive
 a render loop, so the planned motion-pixel canvas stays pure frontend at 60fps while frames

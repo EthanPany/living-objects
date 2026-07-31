@@ -85,7 +85,6 @@
   #meterOuter.dead #meterBar{background:#243430}
   #camPreview{display:none; width:100%; max-width:180px; margin-top:8px; border:1px solid var(--line);
               border-radius:2px; background:#0a0e0d; transform:scaleX(-1)}
-  #camToggle{vertical-align:middle; margin-right:6px; accent-color:var(--accent)}
 
   /* error banner */
   #errors{display:flex; flex-direction:column; gap:6px}
@@ -165,11 +164,9 @@
     </div>
 
     <div>
-      <label for="camToggle">
-        <input type="checkbox" id="camToggle"> Camera 摄像头 <span class="kv">it can see</span>
-      </label>
+      <label>Camera 摄像头 <span class="kv">always on — it can see</span></label>
       <video id="camPreview" autoplay playsinline muted></video>
-      <div class="hint" id="camHint">Camera off. Audio only.</div>
+      <div class="hint" id="camHint">Camera starts with the session.</div>
     </div>
 
     <div class="kv" id="stats">chunks sent <b>0</b> &middot; audio in <b>0</b> &middot; queued <b>0</b></div>
@@ -301,7 +298,7 @@ var voiceSel = $("voice"), voiceSrc = $("voiceSrc"), personaEl = $("persona"), p
 var moodSel = $("mood"), moodHint = $("moodHint");
 var connectBtn = $("connectBtn"), reconnectBtn = $("reconnectBtn");
 var statusText = $("statusText"), meterBar = $("meterBar"), meterOuter = $("meterOuter"), micHint = $("micHint");
-var camToggle = $("camToggle"), camPreview = $("camPreview"), camHint = $("camHint");
+var camPreview = $("camPreview"), camHint = $("camHint");
 var transcriptEl = $("transcript"), textIn = $("textIn"), sendBtn = $("sendBtn");
 var errorsEl = $("errors"), statsEl = $("stats"), clearBtn = $("clearBtn");
 
@@ -354,10 +351,9 @@ function showError(msg){
 
 function saveLocal(){
   try {
-    localStorage.setItem("voicelab.voice", voiceSel.value);
-    localStorage.setItem("voicelab.persona", personaEl.value);
-    localStorage.setItem("voicelab.mood", moodSel.value);
-    localStorage.setItem("voicelab.camera", camToggle.checked ? "1" : "0");
+    localStorage.setItem("livingobj.voice", voiceSel.value);
+    localStorage.setItem("livingobj.persona", personaEl.value);
+    localStorage.setItem("livingobj.mood", moodSel.value);
   } catch(e){}
 }
 function loadLocal(key, dflt){
@@ -461,7 +457,7 @@ function hasVoice(name){
 }
 
 function populateVoices(voices, source){
-  var want = voiceSel.value || loadLocal("voicelab.voice", DEFAULT_VOICE);
+  var want = voiceSel.value || loadLocal("livingobj.voice", DEFAULT_VOICE);
   voiceSel.innerHTML = "";
   voices.forEach(function(v){
     var o = document.createElement("option");
@@ -708,7 +704,11 @@ async function startCamera(myGen){
 }
 
 function sendFrame(myGen){
-  if (myGen !== gen || !camVideo || !ws || ws.readyState !== 1 || state !== "ready") return;
+  /* Gate on readyForAudio, NOT on state. `state` cycles ready -> listening -> speaking,
+     so gating on state === "ready" silently dropped every frame while either party was
+     talking -- which is precisely when the model needs to see. It then answered blind
+     and invented plausible-sounding contents. Same flag the audio path uses. */
+  if (myGen !== gen || !camVideo || !readyForAudio || !ws || ws.readyState !== 1) return;
   var vw = camVideo.videoWidth, vh = camVideo.videoHeight;
   if (!vw || !vh) return;                       /* first frames arrive before metadata */
 
@@ -733,9 +733,7 @@ function stopCamera(){
   try { camPreview.srcObject = null; } catch(e){}
   camPreview.style.display = "none";
   camStream = null; camVideo = null; camCanvas = null; framesSent = 0;
-  camHint.textContent = camToggle && camToggle.checked
-    ? "Camera will start with the next session."
-    : "Camera off. Audio only.";
+  camHint.textContent = "Camera starts with the session.";
 }
 
 /* ------------------------------------------------------------------ *
@@ -774,17 +772,17 @@ async function connect(){
   }
   if (myGen !== gen) return;
 
-  /* camera is optional — a denied or missing camera must not kill an audio session */
-  if (camToggle.checked){
-    try {
-      await startCamera(myGen);
-    } catch(e){
-      showError("Camera unavailable, continuing with audio only: " +
-                (e && e.message ? e.message : e));
-      stopCamera();
-    }
-    if (myGen !== gen) return;
+  /* Camera is always on — seeing the room is the point, not a feature. A denied camera
+     still leaves audio running rather than bricking the session, but it is loudly an
+     error state, not a supported mode. */
+  try {
+    await startCamera(myGen);
+  } catch(e){
+    showError("Camera blocked — it cannot see, and will say so. Allow camera access and " +
+              "reconnect. (" + (e && e.message ? e.message : e) + ")");
+    stopCamera();
   }
+  if (myGen !== gen) return;
 
   var sock;
   try {
@@ -910,19 +908,6 @@ voiceSel.addEventListener("change", function(){
 /* Selecting a mood rewrites the persona AND swaps to the voice that suits it.
    Editing the persona afterwards leaves the dropdown where it is — the text is the
    source of truth, the mood is just a starting point. */
-/* The camera can only be attached when the Gemini session opens, so toggling it
-   mid-call reopens the session the same way a voice change does. */
-camToggle.addEventListener("change", function(){
-  saveLocal();
-  if (state !== "disconnected"){
-    reconnect(camToggle.checked ? "camera on" : "camera off");
-  } else {
-    camHint.textContent = camToggle.checked
-      ? "Camera will start with the next session."
-      : "Camera off. Audio only.";
-  }
-});
-
 moodSel.addEventListener("change", function(){
   var m = moodById(moodSel.value);
   personaEl.value = m.persona;
@@ -1005,14 +990,10 @@ MOODS.forEach(function(m){
   o.textContent = m.label;
   moodSel.appendChild(o);
 });
-moodSel.value = moodById(loadLocal("voicelab.mood", DEFAULT_MOOD)).id;
+moodSel.value = moodById(loadLocal("livingobj.mood", DEFAULT_MOOD)).id;
 moodHint.textContent = moodById(moodSel.value).label + " · voice " + moodById(moodSel.value).voice;
 
-personaEl.value = loadLocal("voicelab.persona", DEFAULT_PERSONA) || DEFAULT_PERSONA;
-camToggle.checked = loadLocal("voicelab.camera", "0") === "1";
-camHint.textContent = camToggle.checked
-  ? "Camera will start with the next session."
-  : "Camera off. Audio only.";
+personaEl.value = loadLocal("livingobj.persona", DEFAULT_PERSONA) || DEFAULT_PERSONA;
 loadVoices();
 setState("disconnected");
 statusText.textContent = "disconnected";

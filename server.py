@@ -149,10 +149,120 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
 async def index():
+    """The demo. / is the thing you show people; /lab is the tuning bench."""
+    page = STATIC_DIR / "anima.html"
+    if not page.exists():
+        return HTMLResponse("<h1>static/anima.html not built yet</h1>", status_code=503)
+    return FileResponse(page)
+
+
+@app.get("/lab")
+async def lab():
     page = STATIC_DIR / "index.html"
     if not page.exists():
         return HTMLResponse("<h1>static/index.html not built yet</h1>", status_code=503)
     return FileResponse(page)
+
+
+# --- imprint: photo + spoken description -> a persona ------------------------
+IMPRINT_MODEL = "gemini-3.5-flash"  # verified present via models.list; 3.1-flash does not exist
+
+IMPRINT_PROMPT = """You are casting a character. The attached photo shows a physical object,
+and the attached audio is its owner saying what it is.
+
+Invent the inner life of THAT SPECIFIC OBJECT -- not objects in general. Use what you can
+actually see: its wear, its colour, its clutter, where it sits, what surrounds it. If the
+owner named it or told you something about it, honour that.
+
+Return JSON only, no prose, with exactly these keys:
+  "vessel"   - what it is, 1-3 lowercase words, e.g. "the oak desk", "a chipped mug"
+  "persona"  - 3-5 lines, second person ("You are ..."). WHO it is: how long it has been
+               there, what it has watched happen, what it privately thinks of its owner,
+               one specific fixation drawn from the photo. Describe identity ONLY --
+               never how it should speak, never how long its replies should be.
+  "greeting" - 2-5 words it says on waking. Uppercase. Flat, unimpressed, a little ominous.
+  "voice"    - one of: Algieba, Algenib, Enceladus, Charon, Gacrux, Sulafat, Zubenelgenubi
+"""
+
+
+@app.post("/imprint")
+async def imprint(payload: dict):
+    """Photo + a few seconds of speech -> a persona for this particular object.
+
+    Falls back to a generic persona on any failure. A demo that cannot fail open here
+    is a demo that dies on stage.
+    """
+    key = api_key()
+    if not key:
+        return JSONResponse({"error": "GEMINI_API_KEY not set"}, status_code=503)
+
+    parts: list[types.Part] = [types.Part(text=IMPRINT_PROMPT)]
+    try:
+        if payload.get("photo"):
+            parts.append(types.Part(inline_data=types.Blob(
+                data=base64.b64decode(payload["photo"]), mime_type="image/jpeg")))
+        if payload.get("audio"):
+            parts.append(types.Part(inline_data=types.Blob(
+                data=base64.b64decode(payload["audio"]), mime_type="audio/wav")))
+    except (ValueError, binascii.Error) as exc:
+        log(f"imprint: bad base64 ({exc})")
+        return JSONResponse(_fallback_persona(), status_code=200)
+
+    log(f"imprint: {len(parts) - 1} media part(s) -> {IMPRINT_MODEL}")
+    try:
+        client = genai.Client(api_key=key)
+        resp = await asyncio.to_thread(
+            client.models.generate_content,
+            model=IMPRINT_MODEL,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        data = _first_json_object(resp.text)
+        out = {
+            "vessel": str(data.get("vessel") or "the object")[:60],
+            "persona": str(data.get("persona") or "").strip(),
+            "greeting": str(data.get("greeting") or "OH. IT'S YOU.")[:40].upper(),
+            "voice": data.get("voice") if data.get("voice") in VOICE_NAMES else DEFAULT_VOICE,
+        }
+        if not out["persona"]:
+            return JSONResponse(_fallback_persona(), status_code=200)
+        log(f"imprint -> vessel={out['vessel']!r} voice={out['voice']}")
+        return JSONResponse(out)
+    except Exception as exc:  # noqa: BLE001 - never let the demo dead-end on this
+        log(f"imprint failed ({exc!r}); using fallback persona")
+        return JSONResponse(_fallback_persona(), status_code=200)
+
+
+def _first_json_object(text: str) -> dict:
+    """Parse the first JSON object in `text`, ignoring anything after it.
+
+    Even with response_mime_type=application/json the model sometimes appends a
+    second object or trailing prose -- json.loads then dies on "Extra data" and
+    a perfectly good persona is thrown away. raw_decode stops at the first value.
+    """
+    s = (text or "").strip()
+    if s.startswith("```"):                       # strip a ```json fence if present
+        s = s.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    start = s.find("{")
+    if start == -1:
+        raise ValueError("no JSON object in response")
+    obj, _ = json.JSONDecoder().raw_decode(s[start:])
+    if not isinstance(obj, dict):
+        raise ValueError("top-level JSON was not an object")
+    return obj
+
+
+def _fallback_persona() -> dict:
+    return {
+        "vessel": "the object",
+        "persona": (
+            "You are an ordinary object that has sat in this room for years.\n"
+            "You have watched the same things happen over and over.\n"
+            "You are tired of all of it."
+        ),
+        "greeting": "OH. IT'S YOU.",
+        "voice": DEFAULT_VOICE,
+    }
 
 
 @app.get("/voices")

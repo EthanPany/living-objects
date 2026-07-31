@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANIMA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+  body{font-family:'Silkscreen',ui-monospace,monospace;color:#fff;user-select:none;cursor:default}
+  #cv{position:absolute;inset:0;width:100%;height:100%;display:block;image-rendering:pixelated}
+
+  /* CRT dressing, all non-interactive */
+  .ov{position:absolute;inset:0;pointer-events:none}
+  #scan{background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0 3px,rgba(0,0,0,.5) 3px 6px)}
+  #vig{background:radial-gradient(ellipse 74% 64% at 50% 50%,rgba(0,0,0,0) 38%,rgba(0,0,0,.58) 76%,rgba(0,0,0,.96) 100%)}
+  #tint{mix-blend-mode:overlay;animation:flick 3.2s steps(2,end) infinite}
+  @keyframes flick{0%,100%{opacity:.05}50%{opacity:.11}}
+  @keyframes cur{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes pop{0%{transform:translate(-50%,-50%) scale(.72)}60%{transform:translate(-50%,-50%) scale(1.06)}100%{transform:translate(-50%,-50%) scale(1)}}
+
+  .hide{display:none !important}
+  .vt{font-family:'VT323',ui-monospace,monospace}
+
+  /* capture framing corners */
+  .corner{position:absolute;width:34px;height:34px}
+  #c1{left:46px;top:46px;border-left:3px solid #fff;border-top:3px solid #fff}
+  #c2{right:46px;top:46px;border-right:3px solid #fff;border-top:3px solid #fff}
+  #c3{left:46px;bottom:46px;border-left:3px solid #fff;border-bottom:3px solid #fff}
+  #c4{right:46px;bottom:46px;border-right:3px solid #fff;border-bottom:3px solid #fff}
+
+  .btm{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);
+       display:flex;flex-direction:column;align-items:center;gap:18px;z-index:5}
+  .btn{cursor:pointer;padding:20px 46px;font-size:13px;letter-spacing:.2em;
+       background:#fff;color:#000;border:3px solid #fff;white-space:nowrap}
+  .btn:hover{background:#c9c9c9}
+  .btn.ghost{background:transparent;color:#fff}
+  .btn.ghost:hover{background:rgba(255,255,255,.12)}
+  .sub{font-size:23px;color:#9a9a9a;letter-spacing:.04em}
+
+  #topmid{position:absolute;left:50%;top:11%;transform:translateX(-50%);text-align:center;
+          display:flex;flex-direction:column;gap:16px;z-index:5}
+  #topmid .t{font-size:15px;letter-spacing:.24em}
+
+  #greet{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;
+         animation:pop .5s cubic-bezier(.2,1.4,.4,1) 1;width:92vw;z-index:6}
+  #greetTxt{font-size:clamp(54px,13vw,190px);line-height:.94;letter-spacing:.04em;color:#fff}
+
+  /* alive HUD */
+  #hudL{position:absolute;top:26px;left:30px;display:flex;flex-direction:column;gap:8px;
+        font-size:11px;letter-spacing:.09em;line-height:1;white-space:nowrap;z-index:5}
+  #hudR{position:absolute;top:26px;right:30px;display:flex;flex-direction:column;align-items:flex-end;
+        gap:8px;white-space:nowrap;z-index:5}
+  #dot{width:7px;height:7px}
+  #hudL .r1{display:flex;align-items:center;gap:9px}
+  #hudL .r2,#hudR .h2{font-family:'VT323',monospace;font-size:18px;color:#6a6a6a;letter-spacing:.04em}
+  #meter{display:flex;gap:3px;margin-top:4px}
+  #meter i{width:5px;height:14px;background:rgba(140,140,140,.18)}
+
+  /* background transcript stream — deliberately hard to read */
+  #logs{position:absolute;left:30px;right:30px;top:96px;bottom:210px;pointer-events:none;
+        display:flex;flex-direction:column;justify-content:flex-end;gap:2px;
+        font-family:'VT323',monospace;font-size:17px;letter-spacing:.03em;
+        overflow:hidden;mix-blend-mode:screen;z-index:2}
+  #logs div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  #line{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);width:min(88vw,1100px);
+        text-align:center;font-size:clamp(22px,3.1vw,46px);line-height:1.22;letter-spacing:.02em;
+        color:#fff;text-wrap:balance;z-index:5}
+  #reset{position:absolute;right:28px;bottom:34px;cursor:pointer;padding:11px 13px;
+         background:rgba(0,0,0,.8);font-size:10px;letter-spacing:.14em;color:#b4b4b4;z-index:6}
+  #reset:hover{color:#fff}
+  #err{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);color:#ff7a70;
+       font-family:'VT323',monospace;font-size:18px;z-index:7;text-align:center;max-width:80vw}
+</style>
+</head>
+<body>
+
+<canvas id="cv"></canvas>
+<div class="ov" id="scan"></div>
+<div class="ov" id="vig"></div>
+<div class="ov" id="tint"></div>
+
+<!-- STEP: frame -->
+<div id="uiFrame">
+  <div class="corner" id="c1"></div><div class="corner" id="c2"></div>
+  <div class="corner" id="c3"></div><div class="corner" id="c4"></div>
+  <div class="btm">
+    <div class="sub vt">point at the thing you want to wake up</div>
+    <div class="btn" id="shootBtn">&#9673; CAPTURE</div>
+  </div>
+</div>
+
+<!-- STEP: record -->
+<div id="uiRec" class="hide">
+  <div id="topmid">
+    <div class="t">TELL IT WHAT IT IS</div>
+    <div class="sub vt">speak out loud. it only listens once.</div>
+  </div>
+  <div class="btm">
+    <div class="vt" id="recTime" style="font-size:30px;letter-spacing:.08em;color:#6a6a6a;min-height:34px">hold the button. say what it is.</div>
+    <div style="display:flex;gap:10px">
+      <div class="btn ghost" id="recBtn">&#9673; HOLD TO SPEAK</div>
+      <div class="btn hide" id="wakeBtn">&#9654; WAKE IT UP</div>
+    </div>
+  </div>
+</div>
+
+<!-- STEP: becoming -->
+<div id="uiBecome" class="hide">
+  <div style="position:absolute;left:50%;bottom:64px;transform:translateX(-50%)"
+       class="vt" id="becomeLine">reading frame<span style="animation:cur 1s steps(1,end) infinite">_</span></div>
+</div>
+
+<!-- STEP: greeting -->
+<div id="uiGreet" class="hide"><div id="greet"><div id="greetTxt">HELLO</div></div></div>
+
+<!-- STEP: black -->
+<div id="uiBlack" class="hide">
+  <div style="position:absolute;inset:0;background:#000;z-index:4"></div>
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;color:#6a6a6a"
+       class="vt" id="blackLine">it settles into being<span style="animation:cur 1s steps(1,end) infinite">_</span></div>
+</div>
+
+<!-- STEP: alive -->
+<div id="uiAlive" class="hide">
+  <div id="logs"></div>
+  <div id="hudL">
+    <div class="r1"><div id="dot"></div><span id="vessel">ANIMA</span></div>
+    <div class="r2" id="uptime">uptime 00:00</div>
+  </div>
+  <div id="hudR">
+    <div style="font-size:11px;letter-spacing:.13em" id="stateLabel">DORMANT</div>
+    <div class="h2" id="stateHint">waiting</div>
+    <div id="meter"></div>
+  </div>
+  <div id="line"></div>
+  <div id="reset">&#8634; NEW VESSEL</div>
+</div>
+
+<div id="err" class="hide"></div>
+
+<script>
+/* =====================================================================
+   ANIMA — the demo surface.
+   Everything visible is one low-res Float32 buffer, Bayer-dithered to a
+   handful of levels and upscaled by the browser (image-rendering:pixelated).
+   Nothing here is a DOM animation; the pixels are the medium.
+
+   What shows when, per the design:
+     silent            -> black
+     you speak         -> pixels grow inward from the screen edges
+     it speaks         -> a globe swells behind the face
+     always, faintly   -> only the MOVING parts of the camera feed
+     always, faintly   -> the real transcript scrolling in the background
+   ===================================================================== */
+
+var BAYER = [0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+
+var MODES = {
+  dormant:   { label:"DORMANT",   hint:"watching the room",   tint:[214,232,255], mouth:"flat"  },
+  listening: { label:"LISTENING", hint:"audio field open",    tint:[148,234,224], mouth:"small" },
+  thinking:  { label:"THINKING",  hint:"recalling fragments", tint:[190,168,255], mouth:"o"     },
+  speaking:  { label:"SPEAKING",  hint:"voice out - 24khz",   tint:[255,224,166], mouth:"smile" },
+  startled:  { label:"STARTLED",  hint:"motion spike",        tint:[255,136,118], mouth:"open"  }
+};
+var BECOME = ["reading frame","transcribing your voice","binding soul","opening eyes"];
+
+var PX = 7;                 /* px per cell — the whole look lives here */
+var cv = document.getElementById("cv");
+var ctx = null, img = null, buf = null, W = 0, H = 0;
+var tint = [230,230,230];
+var step = "frame", mode = "dormant";
+var t0 = performance.now(), last = t0;
+
+function $(id){ return document.getElementById(id); }
+function show(id,on){ $(id).classList.toggle("hide", !on); }
+function showError(m){ var e=$("err"); e.textContent=m; e.classList.remove("hide");
+  clearTimeout(e._t); e._t=setTimeout(function(){ e.classList.add("hide"); }, 9000); }
+
+/* ------------------------------------------------------------------ *
+ * pixel primitives — everything draws into `buf` (max-blend, 0..1)
+ * ------------------------------------------------------------------ */
+function px(x,y,v){
+  x=x|0; y=y|0;
+  if(x<0||y<0||x>=W||y>=H) return;
+  var i=y*W+x; if(v>buf[i]) buf[i]=v;
+}
+var S=1, fx=0, fy=0;                        /* face transform */
+function R(x,y,w,h){                        /* rect in face units */
+  var X=Math.round(fx+x*S), Y=Math.round(fy+y*S);
+  var w0=Math.max(1,Math.round(w*S)), h0=Math.max(1,Math.round(h*S));
+  for(var j=0;j<h0;j++) for(var i=0;i<w0;i++) px(X+i,Y+j,1);
+}
+function A(x,y,rx,ry,a0,a1,th){             /* arc in face units */
+  var CX=fx+x*S, CY=fy+y*S, RX=rx*S, RY=ry*S, T=Math.max(1,Math.round((th||3)*S));
+  var steps=Math.max(64,Math.round((RX+RY)*3));
+  for(var s=0;s<=steps;s++){
+    var a=a0+(a1-a0)*(s/steps), ux=Math.cos(a), uy=Math.sin(a);
+    for(var k=0;k<T;k++){ px(CX+ux*(RX-k),CY+uy*(RY-k),1); px(CX+ux*(RX-k)+1,CY+uy*(RY-k),1); }
+  }
+}
+function LINE(x0,y0,x1,y1,th){              /* thick line in face units */
+  var n=Math.max(2,Math.round(Math.hypot(x1-x0,y1-y0)*S));
+  for(var s=0;s<=n;s++){
+    var u=s/n, X=fx+(x0+(x1-x0)*u)*S, Y=fy+(y0+(y1-y0)*u)*S, T=Math.max(1,Math.round((th||2)*S));
+    for(var k=0;k<T;k++) for(var j=0;j<T;j++) px(X+k,Y+j,1);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * the face — Kare-style: dot eyes, an L nose, one simple mouth stroke.
+ * No outline, no shading. The restraint is the whole point.
+ * ------------------------------------------------------------------ */
+function face(env, scale){
+  var t=(performance.now()-t0)/1000;
+  S = (H/120)*0.92*(scale===undefined?1:scale);
+  fx = W/2;
+  fy = H*0.40 + (mode==="dormant" ? Math.sin(t*0.9)*H*0.006 : 0);
+
+  var blink = ((t*0.55)%4.9) < 0.13 && mode!=="startled";
+  var EX=20, EY=-16;
+
+  /* brows — only when startled, angled inward */
+  if(mode==="startled"){
+    LINE(-EX-6,EY-13,-EX+3,EY-9,2);
+    LINE( EX+6,EY-13, EX-3,EY-9,2);
+  }
+  /* eyes */
+  for(var s=-1;s<=1;s+=2){
+    var x=s*EX;
+    if(blink){ R(x-4,EY+2,8,2); continue; }
+    if(mode==="startled") R(x-4,EY-8,8,17);
+    else                  R(x-3,EY-5,6,11);
+  }
+  /* nose: vertical stroke with a short foot to the left */
+  R(-1,EY+3,3,17);
+  R(-8,EY+17,8,3);
+
+  /* mouth */
+  var MY=22, m=MODES[mode].mouth;
+  if(mode==="speaking"){
+    var h=2+env*11;                                   /* opens with its own voice */
+    A(0,MY-11,17,14,0.18*Math.PI,0.82*Math.PI,3);
+    R(-8,MY-3,16,Math.max(2,h*0.5));
+  }
+  else if(m==="smile") A(0,MY-11,17,14,0.18*Math.PI,0.82*Math.PI,3);
+  else if(m==="flat")  R(-13,MY-1,26,3);
+  else if(m==="small") R(-5,MY-1,10,3);
+  else if(m==="o"){ var r=5+Math.sin(t*2.2)*1.1; A(0,MY,r,r+1,0,Math.PI*2,2.5); }
+  else if(m==="open")  A(0,MY+2,9,12+Math.sin(t*6)*2,0,Math.PI*2,3);
+  else if(m==="frown") A(0,MY+13,17,14,1.18*Math.PI,1.82*Math.PI,3);
+}
+
+/* ------------------------------------------------------------------ *
+ * EDGES — you speaking. Pixels grow inward from all four borders,
+ * depth scaled by your mic level.
+ * ------------------------------------------------------------------ */
+function edges(env,t){
+  if(env<=0.005) return;
+  var depth=0.30*H*env;
+  function n(i){ return 0.5+0.5*Math.sin(i*1.7+t*2.1)*Math.sin(i*0.43-t*1.3)+0.2*Math.sin(i*5.1+t*4.7); }
+  for(var x=0;x<W;x++){
+    var d=depth*(0.25+0.75*Math.max(0,n(x*0.11)));
+    for(var k=0;k<d;k++){
+      var v=(0.25+(1-k/Math.max(d,1))*0.75)*(((x+k)&1)?1:0.5);
+      px(x,k,v); px(x,H-1-k,v);
+    }
+  }
+  for(var y=0;y<H;y++){
+    var d2=depth*0.75*(0.25+0.75*Math.max(0,n(y*0.15+40)));
+    for(var k2=0;k2<d2;k2++){
+      var v2=(0.25+(1-k2/Math.max(d2,1))*0.75)*(((y+k2)&1)?1:0.5);
+      px(k2,y,v2); px(W-1-k2,y,v2);
+    }
+  }
+}
+
+/* GLOBE — it speaking. A dithered disc swelling behind the face. */
+function globe(level){
+  if(level<=0.01) return;
+  var cx=W/2, cy=H*0.40, rr=Math.min(W,H)*(0.16+level*0.20);
+  for(var y=0;y<H;y++){
+    for(var x=0;x<W;x++){
+      var dx=(x-cx)/rr, dy=(y-cy)/(rr*0.92), d=Math.sqrt(dx*dx+dy*dy);
+      if(d>1) continue;
+      var f=(1-d)*(1-d)*(0.35+level*0.65);
+      var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+      if(f>thr*0.55) px(x,y,Math.min(1,f*1.5));
+    }
+  }
+}
+
+function glow(strength){
+  if(strength<=0.01) return;
+  var cx=W/2, cy=H/2, rx=W*0.34, ry=H*0.44;
+  for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+    var dx=(x-cx)/rx, dy=(y-cy)/ry, d=Math.sqrt(dx*dx+dy*dy);
+    if(d>1) continue;
+    var v=(1-d)*(1-d)*strength*0.55, i=y*W+x;
+    if(v>buf[i]) buf[i]=v;
+  }
+}
+
+function ring(p){
+  var cx=W/2, cy=H/2, rmax=Math.sqrt(cx*cx+cy*cy), r=p*rmax*1.15, w=rmax*0.16;
+  for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+    var d=Math.sqrt((x-cx)*(x-cx)+(y-cy)*(y-cy)), f=1-Math.abs(d-r)/w;
+    if(f<=0) continue;
+    var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+    if(f*(1-p*0.5)>thr) px(x,y,1);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * camera
+ *   camFull()   — capture step: the whole feed, 1-bit dithered
+ *   camMotion() — alive step: ONLY what moved. Still things stay black.
+ * ------------------------------------------------------------------ */
+var video=null, camStream=null, src=null, sctx=null, prevLuma=null, heat=null;
+async function startCamera(){
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:640},height:{ideal:480},facingMode:"user"}, audio:false });
+    var v=document.createElement("video");
+    v.srcObject=camStream; v.muted=true; v.playsInline=true; v.autoplay=true;
+    await v.play(); video=v;
+  }catch(e){ video=null; showError("camera blocked — it cannot see"); }
+}
+function ensureSrc(){
+  if(!src || src.width!==W || src.height!==H){
+    src=document.createElement("canvas"); src.width=W; src.height=H;
+    sctx=src.getContext("2d",{willReadFrequently:true});
+    prevLuma=new Float32Array(W*H); heat=new Float32Array(W*H);
+  }
+}
+function lumaNow(){
+  ensureSrc();
+  if(!video) return null;
+  sctx.drawImage(video,0,0,W,H);
+  var d=sctx.getImageData(0,0,W,H).data, out=new Float32Array(W*H);
+  for(var i=0;i<W*H;i++) out[i]=(d[i*4]*0.299+d[i*4+1]*0.587+d[i*4+2]*0.114)/255;
+  return out;
+}
+function camFull(){
+  var L=lumaNow();
+  if(!L){ return; }
+  for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+    var i=y*W+x, v=Math.min(1,Math.max(0,(L[i]-0.5)*1.9+0.5));
+    var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+    buf[i]= v>thr ? 1 : 0;
+  }
+  prevLuma.set(L);
+}
+/* Frame differencing with decay. This is the "moving things glow, still
+   things are black" layer — and it is why the render loop never needs the
+   model: motion is a local computation at 60fps, vision is 1fps elsewhere. */
+var MOTION_GAIN=6.0, MOTION_DECAY=0.90, MOTION_FLOOR=0.055;
+function camMotion(weight){
+  var L=lumaNow();
+  if(!L) return 0;
+  var total=0;
+  for(var i=0;i<W*H;i++){
+    var d=Math.abs(L[i]-prevLuma[i]);
+    if(d<0.035) d=0;                          /* sensor noise floor */
+    var v=Math.min(1,d*MOTION_GAIN);
+    total+=v;
+    var h=heat[i]*MOTION_DECAY;
+    heat[i]= v>h ? v : h;
+    if(heat[i]>MOTION_FLOOR){
+      var y=(i/W)|0, x=i-y*W;
+      var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+      var hv=heat[i]*weight;
+      if(hv>thr*0.5) px(x,y,Math.min(1,hv));
+    }
+  }
+  prevLuma.set(L);
+  return total/(W*H);
+}
+
+/* ------------------------------------------------------------------ *
+ * audio: mic in (16k) + playback (24k). Levels drive the visuals.
+ * ------------------------------------------------------------------ */
+var CAPTURE_RATE=16000, PLAYBACK_RATE=24000;
+var capCtx=null, micStream=null, worklet=null, micAnalyser=null, micBuf=null;
+var micLevel=0, micSmooth=0;
+var playCtx=null, playGain=null, outAnalyser=null, outBuf=null, nextStart=0, activeSrc=new Set();
+var outLevel=0, outSmooth=0;
+var recording=false, recChunks=[], recStartT=0;
+
+var WORKLET_SRC = [
+"class MicProc extends AudioWorkletProcessor{",
+"  constructor(){super(); this.b=new Float32Array(1600); this.n=0;}",
+"  process(inputs){",
+"    const ch=inputs[0] && inputs[0][0]; if(!ch) return true;",
+"    for(let i=0;i<ch.length;i++){",
+"      this.b[this.n++]=ch[i];",
+"      if(this.n===this.b.length){ this.port.postMessage(this.b.slice(0)); this.n=0; }",
+"    }",
+"    return true;",
+"  }",
+"}",
+"registerProcessor('mic-proc',MicProc);"
+].join("\n");
+
+function f32toI16(f){
+  var o=new Int16Array(f.length);
+  for(var i=0;i<f.length;i++){ var s=Math.max(-1,Math.min(1,f[i])); o[i]=s<0?s*0x8000:s*0x7fff; }
+  return o;
+}
+
+async function startMic(){
+  if(capCtx) return;
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}
+  });
+  var AC = window.AudioContext||window.webkitAudioContext;
+  capCtx = new AC({sampleRate:CAPTURE_RATE});
+  if(capCtx.state==="suspended") await capCtx.resume();
+  var blob=new Blob([WORKLET_SRC],{type:"application/javascript"});
+  var url=URL.createObjectURL(blob);
+  await capCtx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+
+  var srcNode=capCtx.createMediaStreamSource(micStream);
+  micAnalyser=capCtx.createAnalyser(); micAnalyser.fftSize=512;
+  micBuf=new Uint8Array(micAnalyser.frequencyBinCount);
+  srcNode.connect(micAnalyser);
+
+  worklet=new AudioWorkletNode(capCtx,"mic-proc");
+  worklet.port.onmessage=function(e){
+    var pcm=f32toI16(e.data);
+    if(recording) recChunks.push(pcm);
+    if(step==="alive" && ws && ws.readyState===1 && wsReady) ws.send(pcm.buffer);
+  };
+  srcNode.connect(worklet);
+  var mute=capCtx.createGain(); mute.gain.value=0;
+  worklet.connect(mute); mute.connect(capCtx.destination);
+}
+function readMic(){
+  if(!micAnalyser) return 0;
+  micAnalyser.getByteFrequencyData(micBuf);
+  var s=0; for(var i=0;i<micBuf.length;i++) s+=micBuf[i];
+  return Math.min(1,(s/micBuf.length)/70);
+}
+
+function ensurePlayback(){
+  if(playCtx) return;
+  var AC=window.AudioContext||window.webkitAudioContext;
+  playCtx=new AC({sampleRate:PLAYBACK_RATE});
+  playGain=playCtx.createGain();
+  outAnalyser=playCtx.createAnalyser(); outAnalyser.fftSize=512;
+  outBuf=new Uint8Array(outAnalyser.frequencyBinCount);
+  playGain.connect(outAnalyser); outAnalyser.connect(playCtx.destination);
+  nextStart=0;
+}
+function enqueuePcm(ab){
+  ensurePlayback();
+  if(playCtx.state==="suspended") playCtx.resume();
+  var i16=new Int16Array(ab), f=new Float32Array(i16.length);
+  for(var i=0;i<i16.length;i++) f[i]=i16[i]/32768;
+  var b=playCtx.createBuffer(1,f.length,PLAYBACK_RATE);
+  b.copyToChannel(f,0);
+  var s=playCtx.createBufferSource(); s.buffer=b; s.connect(playGain);
+  var now=playCtx.currentTime;
+  if(nextStart<now+0.02) nextStart=now+0.08;
+  s.start(nextStart); nextStart+=b.duration;
+  activeSrc.add(s);
+  s.onended=function(){ activeSrc.delete(s); };
+}
+function flushPlayback(){
+  activeSrc.forEach(function(s){ try{s.stop();}catch(e){} });
+  activeSrc.clear();
+  if(playCtx) nextStart=playCtx.currentTime;
+}
+function isSpeaking(){ return activeSrc.size>0 || (playCtx && nextStart>playCtx.currentTime+0.01); }
+function readOut(){
+  if(!outAnalyser) return 0;
+  outAnalyser.getByteFrequencyData(outBuf);
+  var s=0; for(var i=0;i<outBuf.length;i++) s+=outBuf[i];
+  return Math.min(1,(s/outBuf.length)/70);
+}
+
+/* ------------------------------------------------------------------ *
+ * websocket to the Live session
+ * ------------------------------------------------------------------ */
+var ws=null, wsReady=false, persona=null, camTimer=null, framesSent=0;
+var logLines=[], curLine="", aliveStart=0;
+
+function pushLog(text){
+  logLines.push(text);
+  if(logLines.length>26) logLines.shift();
+  var box=$("logs"); box.innerHTML="";
+  var n=logLines.length;
+  for(var i=0;i<n;i++){
+    var d=document.createElement("div");
+    d.textContent="> "+logLines[i];
+    d.style.opacity = String(0.07+0.26*(i/Math.max(1,n-1)));
+    d.style.color = "rgb("+tint.map(function(v){return Math.round(v);}).join(",")+")";
+    box.appendChild(d);
+  }
+}
+
+function connect(){
+  var proto = location.protocol==="https:" ? "wss://" : "ws://";
+  ws = new WebSocket(proto+location.host+"/ws");
+  ws.binaryType="arraybuffer";
+  ws.onopen=function(){
+    ws.send(JSON.stringify({type:"config", voice:persona.voice, system_instruction:persona.persona}));
+  };
+  ws.onmessage=function(ev){
+    if(typeof ev.data!=="string"){ enqueuePcm(ev.data); return; }
+    var d; try{ d=JSON.parse(ev.data); }catch(e){ return; }
+    if(d.type==="ready"){
+      wsReady=true;
+      pushLog("session open - voice "+d.voice);
+      startFrameLoop();
+    } else if(d.type==="interrupted"){
+      flushPlayback(); pushLog("interrupted");
+    } else if(d.type==="transcript"){
+      var who = d.role==="user" ? "you" : "it";
+      pushLog(who+" - "+d.text.trim());
+      if(d.role==="model"){ curLine=(curLine+" "+d.text).trim().slice(-220); }
+      else { curLine=""; }
+    } else if(d.type==="turn_complete"){
+      pushLog("turn complete");
+    } else if(d.type==="error"){
+      showError(d.message||"session error"); pushLog("error - "+(d.message||""));
+    }
+  };
+  ws.onclose=function(){ wsReady=false; stopFrameLoop(); pushLog("session closed"); };
+  ws.onerror=function(){ showError("websocket error"); };
+}
+
+/* 1 fps to the model. The render loop above runs at 60 and never waits on this. */
+function startFrameLoop(){
+  if(camTimer) return;
+  var fc=document.createElement("canvas");
+  camTimer=setInterval(function(){
+    if(!video||!ws||ws.readyState!==1||!wsReady) return;
+    var vw=video.videoWidth, vh=video.videoHeight;
+    if(!vw||!vh) return;
+    var sc=Math.min(1,512/Math.max(vw,vh));
+    fc.width=Math.round(vw*sc); fc.height=Math.round(vh*sc);
+    fc.getContext("2d").drawImage(video,0,0,fc.width,fc.height);
+    var url=fc.toDataURL("image/jpeg",0.6);
+    try{ ws.send(JSON.stringify({type:"video",data:url.slice(url.indexOf(",")+1)})); framesSent++; }catch(e){}
+  },1000);
+}
+function stopFrameLoop(){ if(camTimer){ clearInterval(camTimer); camTimer=null; } }
+
+/* ------------------------------------------------------------------ *
+ * capture -> record -> imprint
+ * ------------------------------------------------------------------ */
+var photoB64=null, heldBuf=null;
+
+$("shootBtn").onclick=async function(){
+  if(video){
+    var c=document.createElement("canvas");
+    var vw=video.videoWidth||640, vh=video.videoHeight||480;
+    var sc=Math.min(1,768/Math.max(vw,vh));
+    c.width=Math.round(vw*sc); c.height=Math.round(vh*sc);
+    c.getContext("2d").drawImage(video,0,0,c.width,c.height);
+    var u=c.toDataURL("image/jpeg",0.75);
+    photoB64=u.slice(u.indexOf(",")+1);
+  }
+  heldBuf=Float32Array.from(buf);
+  try{ await startMic(); }catch(e){ showError("microphone blocked — it cannot hear"); }
+  setStep("record");
+};
+
+function recStart(){
+  if(recording) return;
+  recording=true; recChunks=[]; recStartT=performance.now();
+  $("recBtn").textContent="● RECORDING · RELEASE TO STOP";
+  $("recBtn").classList.remove("ghost");
+}
+function recStop(){
+  if(!recording) return;
+  recording=false;
+  $("recBtn").textContent="◉ RECORD AGAIN";
+  $("recBtn").classList.add("ghost");
+  show("wakeBtn", recChunks.length>0);
+}
+$("recBtn").addEventListener("mousedown",recStart);
+$("recBtn").addEventListener("touchstart",function(e){e.preventDefault();recStart();});
+window.addEventListener("mouseup",recStop);
+window.addEventListener("touchend",recStop);
+
+function wavFromChunks(chunks,rate){
+  var n=0,i; for(i=0;i<chunks.length;i++) n+=chunks[i].length;
+  var pcm=new Int16Array(n), off=0;
+  for(i=0;i<chunks.length;i++){ pcm.set(chunks[i],off); off+=chunks[i].length; }
+  var bytes=pcm.length*2, ab=new ArrayBuffer(44+bytes), dv=new DataView(ab);
+  function str(o,s){ for(var k=0;k<s.length;k++) dv.setUint8(o+k,s.charCodeAt(k)); }
+  str(0,"RIFF"); dv.setUint32(4,36+bytes,true); str(8,"WAVE"); str(12,"fmt ");
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true);
+  dv.setUint32(24,rate,true); dv.setUint32(28,rate*2,true);
+  dv.setUint16(32,2,true); dv.setUint16(34,16,true);
+  str(36,"data"); dv.setUint32(40,bytes,true);
+  new Int16Array(ab,44).set(pcm);
+  var bin="", u8=new Uint8Array(ab);
+  for(i=0;i<u8.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+
+$("wakeBtn").onclick=async function(){
+  setStep("becoming");
+  var audioB64=null;
+  try{ audioB64=wavFromChunks(recChunks,CAPTURE_RATE); }catch(e){}
+  var got=null;
+  try{
+    var r=await fetch("/imprint",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({photo:photoB64,audio:audioB64})});
+    got=await r.json();
+  }catch(e){}
+  persona = (got && got.persona) ? got : {
+    vessel:"the object", voice:"Algieba", greeting:"OH. IT'S YOU.",
+    persona:"You are an ordinary object that has sat in this room for years.\nYou are tired of all of it."
+  };
+  if(persona.error){ showError(persona.error); }
+  becomeDone=true;
+};
+
+/* ------------------------------------------------------------------ *
+ * step machine
+ * ------------------------------------------------------------------ */
+var becomeStart=0, becomeDone=false, greetStart=0, blackStart=0;
+function setStep(s){
+  step=s;
+  show("uiFrame",  s==="frame");
+  show("uiRec",    s==="record");
+  show("uiBecome", s==="becoming");
+  show("uiGreet",  s==="greeting");
+  show("uiBlack",  s==="black");
+  show("uiAlive",  s==="alive");
+  if(s==="becoming"){ becomeStart=performance.now(); becomeDone=false; }
+  if(s==="greeting"){
+    greetStart=performance.now();
+    $("greetTxt").textContent=persona.greeting||"HELLO";
+  }
+  if(s==="black"){
+    blackStart=performance.now();
+    $("blackLine").firstChild.textContent="it settles into being "+(persona.vessel||"the object");
+  }
+  if(s==="alive"){
+    aliveStart=performance.now();
+    $("vessel").textContent="ANIMA / "+String(persona.vessel||"the object").toUpperCase();
+    logLines=[]; pushLog("imprint complete - "+persona.vessel);
+    connect();
+  }
+}
+
+$("reset").onclick=function(){
+  stopFrameLoop();
+  if(ws){ try{ws.close();}catch(e){} ws=null; }
+  wsReady=false; flushPlayback();
+  photoB64=null; recChunks=[]; heldBuf=null; persona=null;
+  show("wakeBtn",false);
+  $("recBtn").textContent="◉ HOLD TO SPEAK"; $("recBtn").classList.add("ghost");
+  setStep("frame");
+};
+
+/* ------------------------------------------------------------------ *
+ * main loop
+ * ------------------------------------------------------------------ */
+function resize(){
+  var w=Math.max(60,Math.round(cv.clientWidth/PX)), h=Math.max(40,Math.round(cv.clientHeight/PX));
+  if(cv.width!==w||cv.height!==h){
+    cv.width=w; cv.height=h;
+    ctx=cv.getContext("2d"); img=ctx.createImageData(w,h); buf=new Float32Array(w*h);
+    W=w; H=h; src=null;
+  }
+}
+
+function loop(now){
+  requestAnimationFrame(loop);
+  resize();
+  var dt=Math.min(0.05,(now-last)/1000); last=now;
+  var t=(now-t0)/1000;
+
+  /* levels */
+  micLevel=readMic(); micSmooth+=(micLevel-micSmooth)*Math.min(1,dt*12);
+  outLevel=readOut(); outSmooth+=(outLevel-outSmooth)*Math.min(1,dt*14);
+
+  /* mode follows who is actually making sound */
+  if(step==="alive"){
+    if(isSpeaking()) mode="speaking";
+    else if(micSmooth>0.035) mode="listening";
+    else mode="dormant";
+  }
+
+  /* tint eases toward the mode colour */
+  var warm = (step==="alive"||step==="greeting") ? MODES[mode].tint
+           : step==="becoming" ? [255,224,166] : [230,230,230];
+  for(var k=0;k<3;k++) tint[k]+=(warm[k]-tint[k])*Math.min(1,dt*3);
+  $("tint").style.background="rgb("+tint.map(function(v){return Math.round(v);}).join(",")+")";
+
+  buf.fill(0);
+
+  if(step==="frame"){
+    camFull();
+  }
+  else if(step==="record"){
+    if(heldBuf) for(var i=0;i<buf.length;i++) buf[i]=heldBuf[i]*0.34;
+    edges(0.12+micSmooth*1.15,t);
+    glow(micSmooth*0.32);
+    var secs=recording?((performance.now()-recStartT)/1000):null;
+    $("recTime").textContent = recording ? secs.toFixed(1)+"s"
+      : (recChunks.length? "captured. wake it up." : "hold the button. say what it is.");
+    $("recTime").style.color = recording ? "#fff" : "#6a6a6a";
+  }
+  else if(step==="becoming"){
+    var p=Math.min(1,(now-becomeStart)/3200);
+    if(heldBuf){
+      var cx=W/2, cy=H/2;
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        var idx=y*W+x, dx=(x-cx)/(W*0.5), dy=(y-cy)/(H*0.5);
+        var r=Math.sqrt(dx*dx+dy*dy), thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+        if(p*2.1-r<thr && heldBuf[idx]>buf[idx]) buf[idx]=heldBuf[idx];
+      }
+    }
+    glow(p*0.5);
+    if(p>0.34) face(0.3, 0.4+0.6*Math.min(1,(p-0.34)/0.66));
+    var bi=Math.min(BECOME.length-1, Math.floor(p*BECOME.length));
+    $("becomeLine").firstChild.textContent=BECOME[bi];
+    if(p>=1 && becomeDone) setStep("greeting");
+  }
+  else if(step==="greeting"){
+    var gp=Math.min(1,(now-greetStart)/1600);
+    glow(0.75-gp*0.25); ring(gp); face(0.9, 1+0.12*Math.sin(gp*Math.PI));
+    if(now-greetStart>2600) setStep("black");
+  }
+  else if(step==="black"){
+    if(now-blackStart>1700) setStep("alive");
+  }
+  else if(step==="alive"){
+    /* the room, but only the parts of it that moved */
+    var motion=camMotion(0.62);
+    if(motion>0.055 && mode!=="speaking") mode="startled";
+    edges(micSmooth*1.25, t);                       /* you */
+    globe(outSmooth);                               /* it */
+    glow(mode==="speaking" ? 0.18+outSmooth*0.34 : 0.06);
+    face(outSmooth);
+    /* HUD */
+    var s=Math.floor((now-aliveStart)/1000);
+    $("uptime").textContent="uptime "+String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")
+      +" · "+framesSent+" frames";
+    $("stateLabel").textContent=MODES[mode].label;
+    $("stateHint").textContent=MODES[mode].hint;
+    $("line").textContent=curLine;
+    var tc="rgb("+tint.map(function(v){return Math.round(v);}).join(",")+")";
+    $("dot").style.background=tc; $("dot").style.boxShadow="0 0 12px "+tc;
+    $("vessel").style.color=tc; $("stateLabel").style.color=tc;
+    $("line").style.textShadow="5px 5px 0 rgba(0,0,0,.95), 0 0 40px "+tc;
+    var bars=$("meter").children, lvl=Math.max(micSmooth,outSmooth);
+    for(var b=0;b<bars.length;b++) bars[b].style.background = (b/bars.length<lvl) ? tc : "rgba(140,140,140,.18)";
+  }
+
+  /* Bayer-dither the buffer to 4 levels and blit */
+  var d=img.data;
+  for(var yy=0;yy<H;yy++) for(var xx=0;xx<W;xx++){
+    var ii=yy*W+xx, v=buf[ii]; if(v>1) v=1;
+    var th=(BAYER[(yy&3)*4+(xx&3)]+0.5)/16;
+    var lum=Math.min(3,Math.floor(v*3+th))/3, o=ii*4;
+    d[o]=tint[0]*lum; d[o+1]=tint[1]*lum; d[o+2]=tint[2]*lum; d[o+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+/* boot */
+(function(){
+  for(var i=0;i<16;i++) $("meter").appendChild(document.createElement("i"));
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    showError("no getUserMedia — open over http://localhost:8000 in Chrome");
+  }
+  resize();
+  startCamera();
+  setStep("frame");
+  requestAnimationFrame(loop);
+  window.addEventListener("keydown",function(e){
+    if(e.code!=="Space") return;
+    e.preventDefault();
+    if(step==="frame") $("shootBtn").click();
+    else if(step==="record" && !recording) recStart();
+  });
+  window.addEventListener("keyup",function(e){ if(e.code==="Space"&&recording) recStop(); });
+})();
+</script>
+</body>
+</html>

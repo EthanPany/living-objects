@@ -335,12 +335,51 @@ Remove any instruction to be curious or ask questions from the persona box.
 **Replies are too long** — strengthen `BEHAVIOR_RULES` in `server.py`; it's appended to
 every session.
 
+## Two surfaces
+
+| Route | What it is |
+|---|---|
+| **`/`** | **ANIMA** — the demo. Point, capture, speak, watch it wake up. |
+| **`/lab`** | The tuning bench. Voice dropdown, mood presets, transcript, text input. |
+
+Keep them separate. The lab exists to answer "does this voice work"; the demo exists to be
+shown to a person standing next to you, and every control on screen weakens it.
+
+### ANIMA flow
+
+**capture** → **record** → **becoming** → **greeting** → **black** → **alive**
+
+Point the camera at an object and hit `CAPTURE` (or spacebar). Hold the button and say what
+it is. `POST /imprint` sends that photo plus your recorded audio to `gemini-3.5-flash`, which
+returns a persona for *that specific object* — its vessel name, a voice chosen from the
+detached end of the range, and a greeting. Then the Live session opens with it.
+
+Imprint **fails open**: any error at all returns a generic weary persona rather than a dead
+end. A demo that can hard-fail on stage is not a demo.
+
+### What renders when
+
+Everything on screen is one low-res `Float32Array`, Bayer-dithered to four levels and
+upscaled by the browser via `image-rendering: pixelated`. No DOM animation — the pixels
+*are* the medium.
+
+| Condition | Visual |
+|---|---|
+| Silent | Black. Nothing. |
+| **You** speak | Pixels grow inward from all four screen edges, depth by mic level |
+| **It** speaks | A dithered globe swells behind the face; the mouth opens with its own voice |
+| Anything moves | Only the *moving* parts of the camera feed appear — still things stay black |
+| Always | The real transcript scrolls in the background at 7–33% opacity |
+
+Motion is frame differencing with decay (`heat[i] = max(heat[i]*0.9, diff)`), computed
+locally at 60fps. This is the reason the 1 fps vision ceiling doesn't matter: the render
+loop never waits on the model, and the model never drives a frame.
+
+The face is Susan Kare grammar — dot eyes, an L-shaped nose, one mouth stroke, no outline.
+The restraint is the point; detail makes it read as a cartoon rather than a thing.
+
 ## Roadmap
 
-The voice layer is the foundation. What's planned on top:
-
-- Full-screen 1-bit dithered canvas — webcam motion rendered as decaying white pixels
-- A Macintosh-style face whose eyes track the motion centroid and whose mouth follows audio
-- Audio-reactive pixels growing inward from the screen edge by intensity
-- Photo → persona bootstrap: point a camera at an object, it becomes that object
 - Persistent memory and an episodic log, so the object remembers what it saw from where it sits
+- Eyes tracking the motion centroid rather than sitting fixed
+- `proactive_audio` so silence becomes a real answer (needs the 2.5 native-audio model)

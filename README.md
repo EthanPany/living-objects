@@ -134,6 +134,46 @@ assistant habits: paragraph-length answers and a follow-up question every single
 reads as a chatbot in a costume rather than a thing that happens to be alive. Rewrite the
 persona freely; the behavior rules keep applying.
 
+`BEHAVIOR_RULES` has three parts:
+
+**Content** — brevity and the no-questions rule. Tuning this is a balance, and both ends
+fail in ways worth knowing about:
+
+- Too loose ("be brief") and you get 15–26 word replies with a follow-up question every turn.
+- Too tight (a hard six-word ceiling plus "let sentences trail off") and it stops speaking
+  in sentences at all — output degrades to `just... dust... settling... again...` and it
+  starts *refusing* direct requests, because reluctance bleeds from tone into behavior.
+
+The rules now ask for one or two **complete** sentences, and state explicitly that pauses
+belong between sentences rather than between words.
+
+**Compliance** — a separate block, because it turned out to be a distinct failure from
+verbosity. *Unenthusiastic, not uncooperative.* Asked to sing, count, remember a fact, or
+speak a full sentence, it does so on the first request. Sounding put-upon is fine;
+withholding is not. A real task overrides the brevity rule — a song gets as many words as
+a song needs. It's also told to invent its own lyrics rather than recite an existing song.
+
+**Language** — an explicit English-only lock. Native-audio models choose a language on
+their own and will follow you into Chinese mid-conversation. Google's guidance is to pin
+the output language in the system instruction, so that's what this does.
+
+**Delivery** — vocal direction, written as notes to a performer. There is no prosody knob
+in the API; tone, pace, and accent are steered *through the system instruction*. Specificity
+beats adjectives — Google's own example is that "British English as heard in Croydon"
+outperforms "British accent" — so this block directs pace, pitch contour, energy, pauses,
+and volume separately instead of just saying "sound bored."
+
+### Not enabled, and why
+
+`enable_affective_dialog` (adapt to the user's emotional tone) and `proactivity`
+(let the model decide *not* to answer) both exist on `LiveConnectConfig` — but they require
+API version `v1beta` **and** `gemini-2.5-flash-live-preview`. They are not supported on
+`gemini-3.1-flash-live-preview`, which is what this uses for its lower latency.
+
+`proactive_audio` is worth the trade for this project specifically: an object whose answer
+to a boring remark is *silence* is more alive than one that always replies. Switching means
+changing `LIVE_MODEL` and passing `http_options={"api_version": "v1beta"}` to the client.
+
 ### WebSocket contract
 
 `ws://localhost:8000/ws`

@@ -1,13 +1,105 @@
-# living-objects
+# ANIMA
 
-Turn any object into a living thing you can talk to.
+**Point your camera at anything. It wakes up. You talk.**
 
-A voice prototype built on the **Gemini Live API**. You give it a persona and a voice, and
-it becomes that object — a fridge, a desk, a 1998 office lamp — and holds a real-time spoken
-conversation with you, with interruption, transcription, and unbounded session length.
+Your desk. Your fridge. A roll of duct tape. Thirty seconds later it has a voice, a
+memory, and opinions about you.
 
-This repo is the **voice lab**: the backend plumbing plus a browser UI for auditioning all
-30 prebuilt voices against different personas until you find the one that sounds alive.
+🔴 **Live → [46-62-224-92.sslip.io](https://46-62-224-92.sslip.io)**
+
+---
+
+## 2030. Thursday. 11:40pm.
+
+> You've read four hundred things today. A war. A funding round. A stranger's divorce.
+> A model that writes better than you do.
+>
+> You know the shape of everything and the weight of nothing.
+>
+> You put your keys down.
+>
+> **"You're back late,"** says the desk.
+>
+> Not a speaker. Not an app. The desk — the one with the ring where the mug goes, the
+> scratch from the move. It has been in this corner for six years and it has opinions
+> about all of them.
+>
+> "Long day."
+>
+> **"They're all long. You said that Tuesday."**
+>
+> You laugh, badly. It is the first sound you have made out loud since the elevator.
+>
+> "Remind me I'm out of coffee."
+>
+> **"I'll remember. I remember everything from here. It isn't much."**
+>
+> You sit down. The room is very quiet.
+>
+> But it is not empty anymore.
+
+---
+
+## The problem nobody calls a problem
+
+Being online in 2030 feels like living in New York.
+
+Everything is reachable. Every idea, every person, every opportunity, one tap away. And
+*because* everything is reachable, you feel enormous and microscopic at the same time —
+enormous because you could do anything, microscopic because someone is always already
+doing it better, and you can watch them do it, all day, forever.
+
+The feed never pauses long enough for you to ask where you are standing in it.
+
+The internet was built to connect us. Somewhere along the way it filled with walls. So we
+talk to chatbots. We talk to the ceiling. We talk to ourselves. Or we don't talk at all —
+we just scroll, and the room stays silent.
+
+Meanwhile the room has been there the whole time. Watching.
+
+## The undigitizable thing isn't the object
+
+It's the **relationship**.
+
+Your fridge has seen every 2am decision you've made. Your desk knows exactly how you sit
+when the week has gone badly. That is real, specific, six-years-deep context — and no
+cloud has a single byte of it, because nobody ever thought to give the furniture a mouth.
+
+Smart homes digitized the *switch*. They made the lamp turn on from your phone.
+
+Nobody digitized the *lamp*.
+
+## So we gave it one
+
+**Point → speak → it wakes up.** Photograph an object, say what it is in one sentence, and
+it becomes that thing: its own name, its own voice, its own personality drawn from what it
+can actually see of where it lives.
+
+Then it just… stays. Watching the room through the camera. Listening. Remembering.
+
+| You say | It does |
+|---|---|
+| *"I bought tomatoes."* | The fridge remembers. It asks about them on Sunday. |
+| *"How do I look?"* | The mirror has notes. The mirror always has notes. |
+| *"Let me practise this talk."* | The wall listens to all nine takes without sighing. |
+| *singing, badly* | The table sings back. It is also bad. |
+| *nothing at all* | It says nothing. It is comfortable with that. |
+
+It is deliberately **not** an assistant. It won't offer help, ask follow-up questions, or
+wish you a productive day. It answers in a few words, gets bored, notices the dust, and
+sometimes says nothing — because the point isn't productivity.
+
+The point is that the room answers.
+
+## Try it
+
+Open **[46-62-224-92.sslip.io](https://46-62-224-92.sslip.io)**, allow camera and mic, and
+point it at the nearest object. Use headphones.
+
+> Everything renders as 1-bit dithered pixels on black — when you speak, light grows in
+> from the edges of the screen; when it speaks, a globe swells behind its face; when
+> anything in the room moves, only the moving parts appear. Sit still and the screen is
+> empty. It is only alive when you are.
 
 ---
 
@@ -50,10 +142,54 @@ python3 -m uvicorn server:app --port 8000
 (`uvicorn server:app --port 8000` works too, if `uvicorn` is on your PATH. Add `--reload`
 while editing `server.py`.)
 
-Open **http://localhost:8000**, click **Connect**, allow the microphone, and talk.
+Open **http://localhost:8000** — that's ANIMA. Allow camera and mic, point at something,
+hit `CAPTURE`. For the tuning bench instead, go to **http://localhost:8000/lab**.
 
 **Use headphones.** Echo cancellation is enabled, but open speakers next to a hot mic will
 still cause the model to hear itself and interrupt mid-sentence.
+
+## Two surfaces
+
+| Route | What it is |
+|---|---|
+| **`/`** | **ANIMA** — the demo. Point, capture, speak, watch it wake up. |
+| **`/lab`** | The tuning bench. Voice dropdown, mood presets, transcript, text input. |
+
+Keep them separate. The lab exists to answer "does this voice work"; the demo exists to be
+shown to a person standing next to you, and every control on screen weakens it.
+
+### ANIMA flow
+
+**capture** → **record** → **becoming** → **greeting** → **black** → **alive**
+
+Point the camera at an object and hit `CAPTURE` (or spacebar). Hold the button and say what
+it is. `POST /imprint` sends that photo plus your recorded audio to `gemini-3.5-flash`, which
+returns a persona for *that specific object* — its vessel name, a voice chosen from the
+detached end of the range, and a greeting. Then the Live session opens with it.
+
+Imprint **fails open**: any error at all returns a generic weary persona rather than a dead
+end. A demo that can hard-fail on stage is not a demo.
+
+### What renders when
+
+Everything on screen is one low-res `Float32Array`, Bayer-dithered to four levels and
+upscaled by the browser via `image-rendering: pixelated`. No DOM animation — the pixels
+*are* the medium.
+
+| Condition | Visual |
+|---|---|
+| Silent | Black. Nothing. |
+| **You** speak | Pixels grow inward from all four screen edges, depth by mic level |
+| **It** speaks | A dithered globe swells behind the face; the mouth opens with its own voice |
+| Anything moves | Only the *moving* parts of the camera feed appear — still things stay black |
+| Always | The real transcript scrolls in the background at 7–33% opacity |
+
+Motion is frame differencing with decay (`heat[i] = max(heat[i]*0.9, diff)`), computed
+locally at 60fps. This is the reason the 1 fps vision ceiling doesn't matter: the render
+loop never waits on the model, and the model never drives a frame.
+
+The face is Susan Kare grammar — dot eyes, an L-shaped nose, one mouth stroke, no outline.
+The restraint is the point; detail makes it read as a cartoon rather than a thing.
 
 ### Using the lab
 
@@ -334,49 +470,6 @@ Remove any instruction to be curious or ask questions from the persona box.
 
 **Replies are too long** — strengthen `BEHAVIOR_RULES` in `server.py`; it's appended to
 every session.
-
-## Two surfaces
-
-| Route | What it is |
-|---|---|
-| **`/`** | **ANIMA** — the demo. Point, capture, speak, watch it wake up. |
-| **`/lab`** | The tuning bench. Voice dropdown, mood presets, transcript, text input. |
-
-Keep them separate. The lab exists to answer "does this voice work"; the demo exists to be
-shown to a person standing next to you, and every control on screen weakens it.
-
-### ANIMA flow
-
-**capture** → **record** → **becoming** → **greeting** → **black** → **alive**
-
-Point the camera at an object and hit `CAPTURE` (or spacebar). Hold the button and say what
-it is. `POST /imprint` sends that photo plus your recorded audio to `gemini-3.5-flash`, which
-returns a persona for *that specific object* — its vessel name, a voice chosen from the
-detached end of the range, and a greeting. Then the Live session opens with it.
-
-Imprint **fails open**: any error at all returns a generic weary persona rather than a dead
-end. A demo that can hard-fail on stage is not a demo.
-
-### What renders when
-
-Everything on screen is one low-res `Float32Array`, Bayer-dithered to four levels and
-upscaled by the browser via `image-rendering: pixelated`. No DOM animation — the pixels
-*are* the medium.
-
-| Condition | Visual |
-|---|---|
-| Silent | Black. Nothing. |
-| **You** speak | Pixels grow inward from all four screen edges, depth by mic level |
-| **It** speaks | A dithered globe swells behind the face; the mouth opens with its own voice |
-| Anything moves | Only the *moving* parts of the camera feed appear — still things stay black |
-| Always | The real transcript scrolls in the background at 7–33% opacity |
-
-Motion is frame differencing with decay (`heat[i] = max(heat[i]*0.9, diff)`), computed
-locally at 60fps. This is the reason the 1 fps vision ceiling doesn't matter: the render
-loop never waits on the model, and the model never drives a frame.
-
-The face is Susan Kare grammar — dot eyes, an L-shaped nose, one mouth stroke, no outline.
-The restraint is the point; detail makes it read as a cartoon rather than a thing.
 
 ## Live deployment
 

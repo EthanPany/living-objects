@@ -83,6 +83,9 @@
   #meterOuter{height:10px; background:#0a0e0d; border:1px solid var(--line); border-radius:2px; overflow:hidden; position:relative}
   #meterBar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent-dim),var(--accent)); transition:width .05s linear}
   #meterOuter.dead #meterBar{background:#243430}
+  #camPreview{display:none; width:100%; max-width:180px; margin-top:8px; border:1px solid var(--line);
+              border-radius:2px; background:#0a0e0d; transform:scaleX(-1)}
+  #camToggle{vertical-align:middle; margin-right:6px; accent-color:var(--accent)}
 
   /* error banner */
   #errors{display:flex; flex-direction:column; gap:6px}
@@ -159,6 +162,14 @@
       <label>Mic level</label>
       <div id="meterOuter" class="dead"><div id="meterBar"></div></div>
       <div class="hint" id="micHint">Mic idle. Echo cancellation on.</div>
+    </div>
+
+    <div>
+      <label for="camToggle">
+        <input type="checkbox" id="camToggle"> Camera 摄像头 <span class="kv">it can see</span>
+      </label>
+      <video id="camPreview" autoplay playsinline muted></video>
+      <div class="hint" id="camHint">Camera off. Audio only.</div>
     </div>
 
     <div class="kv" id="stats">chunks sent <b>0</b> &middot; audio in <b>0</b> &middot; queued <b>0</b></div>
@@ -290,6 +301,7 @@ var voiceSel = $("voice"), voiceSrc = $("voiceSrc"), personaEl = $("persona"), p
 var moodSel = $("mood"), moodHint = $("moodHint");
 var connectBtn = $("connectBtn"), reconnectBtn = $("reconnectBtn");
 var statusText = $("statusText"), meterBar = $("meterBar"), meterOuter = $("meterOuter"), micHint = $("micHint");
+var camToggle = $("camToggle"), camPreview = $("camPreview"), camHint = $("camHint");
 var transcriptEl = $("transcript"), textIn = $("textIn"), sendBtn = $("sendBtn");
 var errorsEl = $("errors"), statsEl = $("stats"), clearBtn = $("clearBtn");
 
@@ -345,6 +357,7 @@ function saveLocal(){
     localStorage.setItem("voicelab.voice", voiceSel.value);
     localStorage.setItem("voicelab.persona", personaEl.value);
     localStorage.setItem("voicelab.mood", moodSel.value);
+    localStorage.setItem("voicelab.camera", camToggle.checked ? "1" : "0");
   } catch(e){}
 }
 function loadLocal(key, dflt){
@@ -664,6 +677,68 @@ function stopCapture(){
 }
 
 /* ------------------------------------------------------------------ *
+ * camera  (JPEG frames, <=1 fps — the Live API ceiling)
+ *
+ * Frames go out as base64 in TEXT frames so the binary channel stays purely
+ * audio. Downscaled hard before encoding: the model reads a 512px frame just
+ * as well as a 1080p one, and video input is billed per minute of stream.
+ * ------------------------------------------------------------------ */
+var camStream = null, camVideo = null, camCanvas = null, camTimer = null, framesSent = 0;
+var CAM_FPS = 1;            /* API maximum. Do not raise. */
+var CAM_MAX_EDGE = 512;     /* longest side, px */
+var CAM_QUALITY = 0.6;
+
+async function startCamera(myGen){
+  camStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+  });
+  if (myGen !== gen){ stopCamera(); return; }
+
+  camVideo = document.createElement("video");
+  camVideo.autoplay = true; camVideo.playsInline = true; camVideo.muted = true;
+  camVideo.srcObject = camStream;
+  await camVideo.play();
+
+  camPreview.srcObject = camStream;
+  camPreview.style.display = "block";
+  camCanvas = document.createElement("canvas");
+
+  camTimer = setInterval(function(){ sendFrame(myGen); }, 1000 / CAM_FPS);
+  camHint.textContent = "Camera live · " + CAM_FPS + " fps · " + CAM_MAX_EDGE + "px";
+}
+
+function sendFrame(myGen){
+  if (myGen !== gen || !camVideo || !ws || ws.readyState !== 1 || state !== "ready") return;
+  var vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+  if (!vw || !vh) return;                       /* first frames arrive before metadata */
+
+  var scale = Math.min(1, CAM_MAX_EDGE / Math.max(vw, vh));
+  camCanvas.width = Math.round(vw * scale);
+  camCanvas.height = Math.round(vh * scale);
+  camCanvas.getContext("2d").drawImage(camVideo, 0, 0, camCanvas.width, camCanvas.height);
+
+  var url = camCanvas.toDataURL("image/jpeg", CAM_QUALITY);
+  var b64 = url.slice(url.indexOf(",") + 1);
+  try {
+    ws.send(JSON.stringify({ type: "video", data: b64 }));
+    framesSent++;
+    camHint.textContent = "Camera live · " + framesSent + " frames · " +
+                          camCanvas.width + "x" + camCanvas.height;
+  } catch(e){}
+}
+
+function stopCamera(){
+  if (camTimer){ clearInterval(camTimer); camTimer = null; }
+  try { if (camStream) camStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+  try { camPreview.srcObject = null; } catch(e){}
+  camPreview.style.display = "none";
+  camStream = null; camVideo = null; camCanvas = null; framesSent = 0;
+  camHint.textContent = camToggle && camToggle.checked
+    ? "Camera will start with the next session."
+    : "Camera off. Audio only.";
+}
+
+/* ------------------------------------------------------------------ *
  * websocket session
  * ------------------------------------------------------------------ */
 
@@ -698,6 +773,18 @@ async function connect(){
     return;
   }
   if (myGen !== gen) return;
+
+  /* camera is optional — a denied or missing camera must not kill an audio session */
+  if (camToggle.checked){
+    try {
+      await startCamera(myGen);
+    } catch(e){
+      showError("Camera unavailable, continuing with audio only: " +
+                (e && e.message ? e.message : e));
+      stopCamera();
+    }
+    if (myGen !== gen) return;
+  }
 
   var sock;
   try {
@@ -780,6 +867,7 @@ function hardReset(){
   }
   flushPlayback();
   stopCapture();
+  stopCamera();
   setState("disconnected");
   connectBtn.textContent = "Connect";
   connectBtn.classList.remove("danger");
@@ -822,6 +910,19 @@ voiceSel.addEventListener("change", function(){
 /* Selecting a mood rewrites the persona AND swaps to the voice that suits it.
    Editing the persona afterwards leaves the dropdown where it is — the text is the
    source of truth, the mood is just a starting point. */
+/* The camera can only be attached when the Gemini session opens, so toggling it
+   mid-call reopens the session the same way a voice change does. */
+camToggle.addEventListener("change", function(){
+  saveLocal();
+  if (state !== "disconnected"){
+    reconnect(camToggle.checked ? "camera on" : "camera off");
+  } else {
+    camHint.textContent = camToggle.checked
+      ? "Camera will start with the next session."
+      : "Camera off. Audio only.";
+  }
+});
+
 moodSel.addEventListener("change", function(){
   var m = moodById(moodSel.value);
   personaEl.value = m.persona;
@@ -908,6 +1009,10 @@ moodSel.value = moodById(loadLocal("voicelab.mood", DEFAULT_MOOD)).id;
 moodHint.textContent = moodById(moodSel.value).label + " · voice " + moodById(moodSel.value).voice;
 
 personaEl.value = loadLocal("voicelab.persona", DEFAULT_PERSONA) || DEFAULT_PERSONA;
+camToggle.checked = loadLocal("voicelab.camera", "0") === "1";
+camHint.textContent = camToggle.checked
+  ? "Camera will start with the next session."
+  : "Camera off. Audio only.";
 loadVoices();
 setState("disconnected");
 statusText.textContent = "disconnected";

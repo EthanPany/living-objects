@@ -79,6 +79,10 @@ still cause the model to hear itself and interrupt mid-sentence.
 - **Apply / Restart** — reopen the session with the current voice and persona.
 - **Transcript pane** — live transcription of both sides. `YOU >` is what it actually heard,
   which is the fastest way to tell whether your mic is being understood.
+- **Camera 摄像头** — off by default. Tick it and the object can *see*: webcam frames go to
+  Gemini at 1 fps, downscaled to 512px, and it will comment on what's in front of it.
+  Toggling mid-call reopens the session, same as changing voice. A denied or missing camera
+  degrades to audio rather than killing the session.
 - **Text box** — send a typed turn without speaking, useful for testing personas quickly.
 
 Mood, voice, and persona are remembered in `localStorage` between reloads.
@@ -163,6 +167,38 @@ beats adjectives — Google's own example is that "British English as heard in C
 outperforms "British accent" — so this block directs pace, pitch contour, energy, pauses,
 and volume separately instead of just saying "sound bored."
 
+### Video
+
+Off by default; tick **Camera** to enable. Frames are captured to an offscreen canvas,
+downscaled to 512px on the longest edge, JPEG-encoded at q0.6, and sent as base64 inside
+**text** frames — the binary channel stays unambiguously audio, and at 1 fps the ~33%
+base64 overhead is noise next to the round trip.
+
+**1 fps is the API ceiling, not a tuning choice.** Don't raise `CAM_FPS`.
+
+That ceiling is convenient rather than limiting: it means a vision model can never drive
+a render loop, so the planned motion-pixel canvas stays pure frontend at 60fps while frames
+go to Gemini only for semantic understanding. Two independent rates, by design.
+
+Note that audio+video sessions cap at **2 minutes** rather than 15 — which would be fatal
+mid-demo, except context window compression is already enabled, so it doesn't apply here.
+
+### Cost
+
+The Live API has **no free tier** — it is paid from the first call, and on the Gemini API
+enabling billing removes the free tier from the whole project rather than supplementing it.
+
+| Stream | Rate |
+|---|---|
+| Audio in | $0.005 / min |
+| Audio out | $0.018 / min |
+| Video in | $0.002 / min |
+| Text in | $0.75 / 1M tokens |
+
+A conversation with camera on runs roughly **$0.025/min (~$1.50/hour)**. Leaving a session
+open and forgotten is the thing to watch, not any single call. `preview_voices.py` is 30 TTS
+calls at $10/1M audio-output tokens — cents, but not free.
+
 ### Not enabled, and why
 
 `enable_affective_dialog` (adapt to the user's emotional tone) and `proactivity`
@@ -183,6 +219,7 @@ changing `LIVE_MODEL` and passing `http_options={"api_version": "v1beta"}` to th
 | → server | text | `{"type":"config","voice":"Kore","system_instruction":"..."}` (first message) |
 | → server | binary | raw PCM16 mono 16000 Hz mic chunks |
 | → server | text | `{"type":"text","text":"..."}` — typed turn |
+| → server | text | `{"type":"video","data":"<base64 jpeg>"}` — webcam frame, ≤1 fps |
 | ← client | text | `{"type":"ready","voice":str}` |
 | ← client | binary | raw PCM16 mono 24000 Hz playback audio |
 | ← client | text | `{"type":"interrupted"}` — flush the playback queue |

@@ -7,6 +7,7 @@ Websocket contract (ws://localhost:8000/ws):
   client -> server  TEXT   {"type":"config","voice":"Kore","system_instruction":"..."}  (FIRST message)
   client -> server  BINARY raw PCM16 mono 16000 Hz mic chunks
   client -> server  TEXT   {"type":"text","text":"..."}          (typed turn instead of speaking)
+  client -> server  TEXT   {"type":"video","data":"<base64 jpeg>"}  (webcam frame, <=1 fps)
   server -> client  TEXT   {"type":"ready","voice":str}
   server -> client  BINARY raw PCM16 mono 24000 Hz playback audio
   server -> client  TEXT   {"type":"interrupted"} | {"type":"turn_complete"}
@@ -15,6 +16,8 @@ Websocket contract (ws://localhost:8000/ws):
 """
 
 import asyncio
+import base64
+import binascii
 import json
 import os
 from pathlib import Path
@@ -32,6 +35,7 @@ STATIC_DIR.mkdir(exist_ok=True)  # frontend agent owns static/index.html; we onl
 
 LIVE_MODEL = "gemini-3.1-flash-live-preview"
 INPUT_MIME = "audio/pcm;rate=16000"  # what the browser mic sends us
+VIDEO_MIME = "image/jpeg"            # webcam frames, <=1 fps (API ceiling)
 DEFAULT_VOICE = "Algieba"  # smooth, unhurried -- carries the detached register best
 DEFAULT_PERSONA = (
     "You are an object that has been in this room a very long time, "
@@ -265,14 +269,28 @@ async def browser_to_gemini(ws: WebSocket, session) -> None:
             log("ignoring non-JSON text frame")
             continue
 
-        if data.get("type") == "text" and data.get("text"):
+        kind = data.get("type")
+
+        if kind == "text" and data.get("text"):
             log(f"typed turn: {data['text'][:80]!r}")
             await session.send_client_content(
                 turns=types.Content(role="user", parts=[types.Part(text=data["text"])]),
                 turn_complete=True,
             )
+        elif kind == "video" and data.get("data"):
+            # Video arrives as base64 JPEG in a TEXT frame rather than as binary, so the
+            # binary channel stays unambiguously audio. At <=1 fps (the API ceiling) the
+            # ~33% base64 overhead is irrelevant next to the round-trip.
+            try:
+                frame = base64.b64decode(data["data"])
+            except (ValueError, binascii.Error) as exc:
+                log(f"bad video frame dropped: {exc}")
+                continue
+            await session.send_realtime_input(
+                video=types.Blob(data=frame, mime_type=VIDEO_MIME)
+            )
         else:
-            log(f"ignoring client message type={data.get('type')!r}")
+            log(f"ignoring client message type={kind!r}")
 
 
 async def gemini_to_browser(ws: WebSocket, session) -> None:

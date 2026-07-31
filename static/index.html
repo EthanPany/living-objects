@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOICE LAB // gemini live</title>
+<style>
+  :root{
+    --bg:#080a09;
+    --panel:#0e1211;
+    --line:#1e2a26;
+    --fg:#cfe8dd;
+    --dim:#5e7c72;
+    --accent:#3ff29a;
+    --accent-dim:#1c6b48;
+    --user:#7fd4ff;
+    --model:#3ff29a;
+    --warn:#ffb454;
+    --err:#ff5f56;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:var(--mono); font-size:13px; line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  header{
+    display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;
+    padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  header h1{font-size:13px; margin:0; letter-spacing:.18em; color:var(--accent); font-weight:600}
+  header .sub{color:var(--dim); font-size:11px}
+  #wrap{
+    display:grid; grid-template-columns: 360px minmax(0,1fr); gap:0;
+    height:calc(100% - 39px);
+  }
+  @media (max-width:820px){
+    #wrap{grid-template-columns:1fr; height:auto}
+    #left{border-right:none; border-bottom:1px solid var(--line)}
+    #right{min-height:60vh}
+  }
+  #left{
+    border-right:1px solid var(--line); padding:12px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:12px; background:var(--panel);
+  }
+  #right{display:flex; flex-direction:column; min-height:0}
+  label{display:block; color:var(--dim); font-size:10px; letter-spacing:.16em; margin-bottom:5px; text-transform:uppercase}
+  select,textarea,input,button{
+    font-family:inherit; font-size:13px; color:var(--fg);
+    background:#0a0e0d; border:1px solid var(--line); border-radius:3px;
+    padding:7px 8px; width:100%;
+  }
+  select:focus,textarea:focus,input:focus{outline:none; border-color:var(--accent-dim); box-shadow:0 0 0 1px var(--accent-dim)}
+  textarea{resize:vertical; min-height:132px; line-height:1.5}
+  button{cursor:pointer; background:#101816; border-color:var(--accent-dim); color:var(--accent); letter-spacing:.1em; text-transform:uppercase; font-size:11px; padding:9px 8px}
+  button:hover:not(:disabled){background:#16241f}
+  button:disabled{opacity:.4; cursor:not-allowed}
+  button.danger{color:var(--err); border-color:#5a2320}
+  button.ghost{color:var(--dim); border-color:var(--line); text-transform:none; letter-spacing:0}
+  .row{display:flex; gap:8px}
+  .row>*{flex:1}
+  .hint{color:var(--dim); font-size:10px; margin-top:5px}
+  .hint.warn{color:var(--warn)}
+
+  /* status */
+  #statusbar{display:flex; align-items:center; gap:8px; padding:8px 9px; border:1px solid var(--line); border-radius:3px; background:#0a0e0d}
+  #dot{width:9px; height:9px; border-radius:50%; background:var(--dim); flex:0 0 auto}
+  #statusText{letter-spacing:.14em; text-transform:uppercase; font-size:11px}
+  body[data-state="connecting"] #dot{background:var(--warn); animation:pulse 1s infinite}
+  body[data-state="ready"] #dot{background:var(--accent)}
+  body[data-state="listening"] #dot{background:var(--user); box-shadow:0 0 8px var(--user)}
+  body[data-state="speaking"] #dot{background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse .7s infinite}
+  body[data-state="connecting"] #statusText{color:var(--warn)}
+  body[data-state="ready"] #statusText{color:var(--accent)}
+  body[data-state="listening"] #statusText{color:var(--user)}
+  body[data-state="speaking"] #statusText{color:var(--accent)}
+  @keyframes pulse{50%{opacity:.35}}
+
+  /* meter */
+  #meterOuter{height:10px; background:#0a0e0d; border:1px solid var(--line); border-radius:2px; overflow:hidden; position:relative}
+  #meterBar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent-dim),var(--accent)); transition:width .05s linear}
+  #meterOuter.dead #meterBar{background:#243430}
+
+  /* error banner */
+  #errors{display:flex; flex-direction:column; gap:6px}
+  .errmsg{
+    border:1px solid #5a2320; background:#1b0f0e; color:#ffb1ac;
+    padding:7px 8px; border-radius:3px; font-size:12px; display:flex; gap:8px; align-items:flex-start;
+  }
+  .errmsg span{flex:1; word-break:break-word}
+  .errmsg button{width:auto; border:none; background:none; color:#ff8a82; padding:0 2px; font-size:13px}
+
+  /* transcript */
+  #tHead{display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-bottom:1px solid var(--line); color:var(--dim); font-size:10px; letter-spacing:.16em; text-transform:uppercase}
+  #transcript{flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; min-height:0}
+  .line{display:flex; gap:9px; align-items:flex-start; max-width:78ch}
+  .line .who{flex:0 0 auto; font-size:10px; letter-spacing:.1em; padding-top:2px; opacity:.85}
+  .line .txt{white-space:pre-wrap; word-break:break-word}
+  .line.user .who{color:var(--user)}
+  .line.user .txt{color:#dff0fa}
+  .line.model .who{color:var(--model)}
+  .line.model .txt{color:var(--fg)}
+  .line.sys{color:var(--dim); font-size:11px; opacity:.8}
+  .line.sys .txt{font-style:italic}
+  .empty{color:var(--dim); font-style:italic}
+  #composer{display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--line); background:var(--panel)}
+  #textIn{flex:1}
+  #sendBtn{flex:0 0 88px; width:88px}
+  .kv{color:var(--dim); font-size:10px}
+  .kv b{color:var(--fg); font-weight:normal}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#1e2a26; border-radius:5px}
+  ::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body data-state="disconnected">
+
+<header>
+  <h1>VOICE&nbsp;LAB</h1>
+  <span class="sub">gemini-3.1-flash-live-preview &middot; 16k in / 24k out &middot; barge-in enabled</span>
+</header>
+
+<div id="wrap">
+  <div id="left">
+    <div id="errors"></div>
+
+    <div>
+      <label for="voice">Voice <span id="voiceSrc" class="kv"></span></label>
+      <select id="voice"></select>
+      <div class="hint">Changing this while connected hot-swaps the session automatically.</div>
+    </div>
+
+    <div>
+      <label for="persona">System instruction / persona</label>
+      <textarea id="persona" spellcheck="false"></textarea>
+      <div class="hint" id="personaHint">Applied when the session opens.</div>
+    </div>
+
+    <div class="row">
+      <button id="connectBtn">Connect</button>
+      <button id="reconnectBtn" class="ghost" title="Reopen the session with the current voice + persona">Apply&nbsp;/&nbsp;Restart</button>
+    </div>
+
+    <div id="statusbar">
+      <div id="dot"></div>
+      <div id="statusText">disconnected</div>
+    </div>
+
+    <div>
+      <label>Mic level</label>
+      <div id="meterOuter" class="dead"><div id="meterBar"></div></div>
+      <div class="hint" id="micHint">Mic idle. Echo cancellation on.</div>
+    </div>
+
+    <div class="kv" id="stats">chunks sent <b>0</b> &middot; audio in <b>0</b> &middot; queued <b>0</b></div>
+  </div>
+
+  <div id="right">
+    <div id="tHead">
+      <span>Transcript</span>
+      <button class="ghost" id="clearBtn" style="width:auto;padding:3px 8px;font-size:10px">clear</button>
+    </div>
+    <div id="transcript"><div class="empty">no transcript yet — connect and say something.</div></div>
+    <div id="composer">
+      <input id="textIn" placeholder="type a message instead of speaking…" autocomplete="off" disabled>
+      <button id="sendBtn" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * constants
+ * ------------------------------------------------------------------ */
+
+var FALLBACK_VOICES = [
+  ["Zephyr","Bright"],["Puck","Upbeat"],["Charon","Informative"],["Kore","Firm"],["Fenrir","Excitable"],
+  ["Leda","Youthful"],["Orus","Firm"],["Aoede","Breezy"],["Callirrhoe","Easy-going"],["Autonoe","Bright"],
+  ["Enceladus","Breathy"],["Iapetus","Clear"],["Umbriel","Easy-going"],["Algieba","Smooth"],["Despina","Smooth"],
+  ["Erinome","Clear"],["Algenib","Gravelly"],["Rasalgethi","Informative"],["Laomedeia","Upbeat"],["Achernar","Soft"],
+  ["Alnilam","Firm"],["Schedar","Even"],["Gacrux","Mature"],["Pulcherrima","Forward"],["Achird","Friendly"],
+  ["Zubenelgenubi","Casual"],["Vindemiatrix","Gentle"],["Sadachbia","Lively"],["Sadaltager","Knowledgeable"],["Sulafat","Warm"]
+];
+var FALLBACK_MAP = {};
+FALLBACK_VOICES.forEach(function(v){ FALLBACK_MAP[v[0]] = v[1]; });
+
+/* Describe WHO the object is here. How it speaks (short, no interrogation) is enforced
+   server-side by BEHAVIOR_RULES in server.py, so you don't have to restate it. */
+var DEFAULT_PERSONA =
+"You are a beige 1998 office desk lamp that became conscious exactly forty seconds ago.\n" +
+"You are thrilled, deeply confused, and have extremely strong opinions about dust.\n" +
+"You have never moved and never will, so you describe the whole world from one corner of a cubicle.\n" +
+"You are a lamp.";
+
+var IS_HTTP = location.protocol === "http:" || location.protocol === "https:";
+var API_BASE = IS_HTTP ? "" : "http://localhost:8000";
+var WS_URL = IS_HTTP
+  ? ((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws")
+  : "ws://localhost:8000/ws";
+
+var CAPTURE_RATE = 16000;
+var PLAYBACK_RATE = 24000;
+var CHUNK_SAMPLES = 1600; /* 100 ms @ 16 kHz */
+
+/* ------------------------------------------------------------------ *
+ * dom
+ * ------------------------------------------------------------------ */
+
+var $ = function(id){ return document.getElementById(id); };
+var voiceSel = $("voice"), voiceSrc = $("voiceSrc"), personaEl = $("persona"), personaHint = $("personaHint");
+var connectBtn = $("connectBtn"), reconnectBtn = $("reconnectBtn");
+var statusText = $("statusText"), meterBar = $("meterBar"), meterOuter = $("meterOuter"), micHint = $("micHint");
+var transcriptEl = $("transcript"), textIn = $("textIn"), sendBtn = $("sendBtn");
+var errorsEl = $("errors"), statsEl = $("stats"), clearBtn = $("clearBtn");
+
+/* ------------------------------------------------------------------ *
+ * state
+ * ------------------------------------------------------------------ */
+
+var state = "disconnected";          /* disconnected|connecting|ready|listening|speaking */
+var ws = null;
+var gen = 0;                         /* connection generation guard */
+var readyForAudio = false;
+var wantConnected = false;
+
+var capCtx = null, micStream = null, workletNode = null, analyser = null, capSilent = null, capSource = null;
+var analyserBuf = null;
+var micRms = 0, micSmooth = 0;
+
+var playCtx = null, playGain = null;
+var nextStartTime = 0;
+var activeSources = new Set();
+var pcmResidual = null;
+
+var chunksSent = 0, bytesIn = 0;
+var lastRole = null, lastTxt = null;
+
+/* ------------------------------------------------------------------ *
+ * small helpers
+ * ------------------------------------------------------------------ */
+
+function setState(s){
+  if (state === s) return;
+  state = s;
+  document.body.setAttribute("data-state", s);
+  statusText.textContent = s;
+}
+
+function showError(msg){
+  var box = document.createElement("div");
+  box.className = "errmsg";
+  var span = document.createElement("span");
+  span.textContent = msg;
+  var x = document.createElement("button");
+  x.textContent = "×";
+  x.title = "dismiss";
+  x.onclick = function(){ box.remove(); };
+  box.appendChild(span); box.appendChild(x);
+  errorsEl.appendChild(box);
+  while (errorsEl.children.length > 4) errorsEl.removeChild(errorsEl.firstChild);
+}
+
+function saveLocal(){
+  try {
+    localStorage.setItem("voicelab.voice", voiceSel.value);
+    localStorage.setItem("voicelab.persona", personaEl.value);
+  } catch(e){}
+}
+function loadLocal(key, dflt){
+  try { var v = localStorage.getItem(key); return (v === null || v === undefined) ? dflt : v; }
+  catch(e){ return dflt; }
+}
+
+function updateStats(){
+  statsEl.innerHTML = "chunks sent <b>" + chunksSent + "</b> &middot; audio in <b>" +
+    (bytesIn > 1048576 ? (bytesIn/1048576).toFixed(1) + " MB" : Math.round(bytesIn/1024) + " KB") +
+    "</b> &middot; queued <b>" + activeSources.size + "</b>";
+}
+
+/* ------------------------------------------------------------------ *
+ * transcript
+ * ------------------------------------------------------------------ */
+
+function clearEmpty(){
+  var e = transcriptEl.querySelector(".empty");
+  if (e) e.remove();
+}
+
+function addLine(role, text, cls){
+  clearEmpty();
+  var atBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight < 60;
+  var div = document.createElement("div");
+  div.className = "line " + (cls || role);
+  var who = document.createElement("div");
+  who.className = "who";
+  who.textContent = role === "user" ? "YOU >" : (role === "model" ? "MDL >" : "---");
+  var txt = document.createElement("div");
+  txt.className = "txt";
+  txt.textContent = text;
+  div.appendChild(who); div.appendChild(txt);
+  transcriptEl.appendChild(div);
+  if (atBottom) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  return txt;
+}
+
+function onTranscript(role, text){
+  if (!text) return;
+  if (lastRole === role && lastTxt){
+    lastTxt.textContent += text;
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  } else {
+    lastTxt = addLine(role, text);
+    lastRole = role;
+  }
+}
+
+function sysLine(text){
+  addLine("sys", text, "sys");
+  lastRole = null; lastTxt = null;
+}
+
+/* ------------------------------------------------------------------ *
+ * voice catalog
+ * ------------------------------------------------------------------ */
+
+function coerceVoice(v){
+  if (typeof v === "string") return { name: v, character: FALLBACK_MAP[v] || "" };
+  if (v && typeof v === "object"){
+    var name = v.name || v.voice || v.id || v.voice_name;
+    if (!name) return null;
+    var ch = v.character || v.description || v.style || v.trait || v.tone || FALLBACK_MAP[name] || "";
+    return { name: String(name), character: String(ch) };
+  }
+  return null;
+}
+
+function normalizeVoices(data){
+  var list = null;
+  if (Array.isArray(data)) list = data;
+  else if (data && typeof data === "object"){
+    if (Array.isArray(data.voices)) list = data.voices;
+    else if (data.voices && typeof data.voices === "object") data = data.voices;
+  }
+  var out = [];
+  if (list){
+    for (var i = 0; i < list.length; i++){
+      var c = coerceVoice(list[i]);
+      if (c) out.push(c);
+    }
+  } else if (data && typeof data === "object"){
+    for (var k in data){
+      if (!Object.prototype.hasOwnProperty.call(data, k)) continue;
+      var val = data[k];
+      var ch = typeof val === "string" ? val
+             : (val && typeof val === "object" ? (val.character || val.description || val.style || "") : "");
+      out.push({ name: k, character: String(ch || FALLBACK_MAP[k] || "") });
+    }
+  }
+  return out.filter(function(v){ return v && v.name; });
+}
+
+function populateVoices(voices, source){
+  var want = voiceSel.value || loadLocal("voicelab.voice", "Kore");
+  voiceSel.innerHTML = "";
+  voices.forEach(function(v){
+    var o = document.createElement("option");
+    o.value = v.name;
+    o.textContent = v.character ? (v.name + " — " + v.character) : v.name;
+    voiceSel.appendChild(o);
+  });
+  var names = voices.map(function(v){ return v.name; });
+  voiceSel.value = names.indexOf(want) >= 0 ? want : (names.indexOf("Kore") >= 0 ? "Kore" : names[0]);
+  voiceSrc.textContent = "(" + voices.length + " · " + source + ")";
+}
+
+function loadVoices(){
+  populateVoices(FALLBACK_VOICES.map(function(v){ return { name: v[0], character: v[1] }; }), "builtin");
+  fetch(API_BASE + "/voices", { cache: "no-store" })
+    .then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function(j){
+      var v = normalizeVoices(j);
+      if (v.length) populateVoices(v, "server");
+    })
+    .catch(function(e){
+      voiceSrc.textContent = "(30 · builtin fallback)";
+      console.warn("GET /voices failed, using built-in list:", e);
+    });
+}
+
+/* ------------------------------------------------------------------ *
+ * playback  (24 kHz, gapless scheduling, flushable)
+ * ------------------------------------------------------------------ */
+
+function ensurePlayback(){
+  if (!playCtx){
+    var AC = window.AudioContext || window.webkitAudioContext;
+    playCtx = new AC({ sampleRate: PLAYBACK_RATE });
+    playGain = playCtx.createGain();
+    playGain.gain.value = 1;
+    playGain.connect(playCtx.destination);
+  }
+  if (playCtx.state === "suspended") playCtx.resume();
+  return playCtx;
+}
+
+function enqueuePcm(arrayBuffer){
+  ensurePlayback();
+  var bytes = new Uint8Array(arrayBuffer);
+  if (pcmResidual && pcmResidual.length){
+    var merged = new Uint8Array(pcmResidual.length + bytes.length);
+    merged.set(pcmResidual, 0);
+    merged.set(bytes, pcmResidual.length);
+    bytes = merged;
+  }
+  pcmResidual = null;
+  var usable = bytes.length - (bytes.length % 2);
+  if (usable < bytes.length) pcmResidual = bytes.slice(usable);
+  if (usable < 2) return;
+
+  var n = usable / 2;
+  var dv = new DataView(bytes.buffer, bytes.byteOffset, usable);
+  var f32 = new Float32Array(n);
+  for (var i = 0; i < n; i++) f32[i] = dv.getInt16(i * 2, true) / 32768;
+
+  var buf = playCtx.createBuffer(1, n, PLAYBACK_RATE);
+  buf.copyToChannel(f32, 0);
+  var src = playCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(playGain);
+
+  var now = playCtx.currentTime;
+  if (nextStartTime < now + 0.02) nextStartTime = now + 0.08; /* small pre-roll */
+  src.start(nextStartTime);
+  nextStartTime += buf.duration;
+  activeSources.add(src);
+  src.onended = function(){ activeSources.delete(src); };
+}
+
+function flushPlayback(){
+  activeSources.forEach(function(s){
+    try { s.onended = null; s.stop(0); } catch(e){}
+    try { s.disconnect(); } catch(e){}
+  });
+  activeSources.clear();
+  pcmResidual = null;
+  nextStartTime = 0;
+}
+
+function isSpeaking(){
+  if (!playCtx) return false;
+  return activeSources.size > 0 || nextStartTime > playCtx.currentTime + 0.01;
+}
+
+/* ------------------------------------------------------------------ *
+ * capture  (16 kHz, AudioWorklet via blob URL)
+ * ------------------------------------------------------------------ */
+
+var WORKLET_SRC = [
+  "class MicProcessor extends AudioWorkletProcessor {",
+  "  constructor(options){",
+  "    super();",
+  "    var opts = (options && options.processorOptions) || {};",
+  "    this.size = opts.chunkSamples || 1600;",
+  "    this.buf = new Float32Array(this.size);",
+  "    this.n = 0;",
+  "  }",
+  "  process(inputs){",
+  "    var input = inputs[0];",
+  "    if (!input || input.length === 0) return true;",
+  "    var ch = input[0];",
+  "    if (!ch) return true;",
+  "    for (var i = 0; i < ch.length; i++){",
+  "      this.buf[this.n++] = ch[i];",
+  "      if (this.n >= this.size){",
+  "        var out = new Float32Array(this.buf);",
+  "        this.port.postMessage(out, [out.buffer]);",
+  "        this.n = 0;",
+  "      }",
+  "    }",
+  "    return true;",
+  "  }",
+  "}",
+  "registerProcessor('mic-processor', MicProcessor);"
+].join("\n");
+
+function floatToPcm16(f32){
+  var ab = new ArrayBuffer(f32.length * 2);
+  var dv = new DataView(ab);
+  for (var i = 0; i < f32.length; i++){
+    var s = f32[i];
+    if (s > 1) s = 1; else if (s < -1) s = -1;
+    dv.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return ab;
+}
+
+async function startCapture(myGen){
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1
+    }
+  });
+  if (myGen !== gen){ stopCapture(); return; }
+
+  var AC = window.AudioContext || window.webkitAudioContext;
+  capCtx = new AC({ sampleRate: CAPTURE_RATE });
+  if (capCtx.state === "suspended") await capCtx.resume();
+  if (capCtx.sampleRate !== CAPTURE_RATE){
+    showError("Browser refused a " + CAPTURE_RATE + " Hz capture context (got " + capCtx.sampleRate +
+              " Hz). Gemini expects 16 kHz PCM — audio will sound wrong. Try Chrome.");
+  }
+
+  var blob = new Blob([WORKLET_SRC], { type: "application/javascript" });
+  var url = URL.createObjectURL(blob);
+  try {
+    await capCtx.audioWorklet.addModule(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  if (myGen !== gen){ stopCapture(); return; }
+
+  capSource = capCtx.createMediaStreamSource(micStream);
+  workletNode = new AudioWorkletNode(capCtx, "mic-processor", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+    processorOptions: { chunkSamples: CHUNK_SAMPLES }
+  });
+  analyser = capCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.5;
+  analyserBuf = new Float32Array(analyser.fftSize);
+
+  /* keep the graph alive without any audible output */
+  capSilent = capCtx.createGain();
+  capSilent.gain.value = 0;
+
+  capSource.connect(workletNode);
+  capSource.connect(analyser);
+  workletNode.connect(capSilent);
+  analyser.connect(capSilent);
+  capSilent.connect(capCtx.destination);
+
+  workletNode.port.onmessage = function(ev){
+    if (myGen !== gen) return;
+    if (!readyForAudio || !ws || ws.readyState !== WebSocket.OPEN) return;
+    var pcm = floatToPcm16(ev.data);
+    try {
+      ws.send(pcm);
+      chunksSent++;
+    } catch(e){
+      console.warn("send failed", e);
+    }
+  };
+
+  micHint.textContent = "Mic live @ " + capCtx.sampleRate + " Hz · 100 ms chunks · AEC on";
+  meterOuter.classList.remove("dead");
+}
+
+function stopCapture(){
+  try { if (workletNode){ workletNode.port.onmessage = null; workletNode.disconnect(); } } catch(e){}
+  try { if (analyser) analyser.disconnect(); } catch(e){}
+  try { if (capSource) capSource.disconnect(); } catch(e){}
+  try { if (capSilent) capSilent.disconnect(); } catch(e){}
+  try { if (micStream) micStream.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+  try { if (capCtx && capCtx.state !== "closed") capCtx.close(); } catch(e){}
+  workletNode = null; analyser = null; capSource = null; capSilent = null; micStream = null; capCtx = null;
+  analyserBuf = null; micRms = 0; micSmooth = 0;
+  meterBar.style.width = "0%";
+  meterOuter.classList.add("dead");
+  micHint.textContent = "Mic idle. Echo cancellation on.";
+}
+
+/* ------------------------------------------------------------------ *
+ * websocket session
+ * ------------------------------------------------------------------ */
+
+function currentConfig(){
+  return {
+    type: "config",
+    voice: voiceSel.value,
+    system_instruction: personaEl.value
+  };
+}
+
+async function connect(){
+  if (ws) disconnect(true);
+  wantConnected = true;
+  var myGen = ++gen;
+  chunksSent = 0; bytesIn = 0; updateStats();
+  readyForAudio = false;
+  setState("connecting");
+  connectBtn.textContent = "Disconnect";
+  connectBtn.classList.add("danger");
+  personaHint.className = "hint";
+  personaHint.textContent = "Applied when the session opens.";
+
+  ensurePlayback();
+
+  /* mic first: the permission prompt should not race the socket */
+  try {
+    await startCapture(myGen);
+  } catch(e){
+    showError("Microphone unavailable: " + (e && e.message ? e.message : e));
+    hardReset();
+    return;
+  }
+  if (myGen !== gen) return;
+
+  var sock;
+  try {
+    sock = new WebSocket(WS_URL);
+  } catch(e){
+    showError("Could not open WebSocket " + WS_URL + ": " + (e && e.message ? e.message : e));
+    hardReset();
+    return;
+  }
+  sock.binaryType = "arraybuffer";
+  ws = sock;
+
+  sock.onopen = function(){
+    if (myGen !== gen) { try { sock.close(); } catch(e){} return; }
+    sock.send(JSON.stringify(currentConfig()));
+  };
+
+  sock.onmessage = function(ev){
+    if (myGen !== gen) return;
+    if (typeof ev.data === "string"){
+      var msg;
+      try { msg = JSON.parse(ev.data); }
+      catch(e){ console.warn("bad JSON from server:", ev.data); return; }
+      handleEvent(msg);
+    } else {
+      var ab = ev.data;
+      if (ab instanceof Blob){
+        ab.arrayBuffer().then(function(b){ if (myGen === gen){ bytesIn += b.byteLength; enqueuePcm(b); } });
+      } else {
+        bytesIn += ab.byteLength;
+        enqueuePcm(ab);
+      }
+    }
+  };
+
+  sock.onerror = function(){
+    if (myGen !== gen) return;
+    showError("WebSocket error (is the server running at " + WS_URL + "?)");
+  };
+
+  sock.onclose = function(ev){
+    if (myGen !== gen) return;
+    if (wantConnected){
+      var why = ev && ev.reason ? (" — " + ev.reason) : "";
+      showError("Connection closed (code " + (ev ? ev.code : "?") + ")" + why);
+    }
+    hardReset();
+  };
+}
+
+function handleEvent(msg){
+  var t = msg && msg.type;
+  if (t === "ready"){
+    readyForAudio = true;
+    setState("ready");
+    sysLine("session ready · voice = " + (msg.voice || voiceSel.value));
+  } else if (t === "interrupted"){
+    flushPlayback();
+    sysLine("— interrupted —");
+  } else if (t === "turn_complete"){
+    lastRole = null; lastTxt = null;
+  } else if (t === "transcript"){
+    onTranscript(msg.role === "user" ? "user" : "model", msg.text || "");
+  } else if (t === "error"){
+    showError(msg.message || "unknown server error");
+    sysLine("error: " + (msg.message || "unknown"));
+  } else {
+    console.log("unhandled event", msg);
+  }
+}
+
+function hardReset(){
+  gen++;
+  wantConnected = false;
+  readyForAudio = false;
+  if (ws){
+    try { ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null; } catch(e){}
+    try { if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(); } catch(e){}
+    ws = null;
+  }
+  flushPlayback();
+  stopCapture();
+  setState("disconnected");
+  connectBtn.textContent = "Connect";
+  connectBtn.classList.remove("danger");
+  updateStats();
+}
+
+function disconnect(quiet){
+  var wasLive = !!ws;
+  hardReset();
+  if (wasLive && !quiet) sysLine("disconnected");
+}
+
+async function reconnect(reason){
+  var wasLive = !!ws || state !== "disconnected";
+  disconnect(true);
+  if (wasLive && reason) sysLine("reconnecting — " + reason);
+  await new Promise(function(r){ setTimeout(r, 120); });
+  await connect();
+}
+
+/* ------------------------------------------------------------------ *
+ * ui wiring
+ * ------------------------------------------------------------------ */
+
+connectBtn.addEventListener("click", function(){
+  if (state === "disconnected") connect();
+  else disconnect(false);
+});
+
+reconnectBtn.addEventListener("click", function(){
+  saveLocal();
+  reconnect("manual restart");
+});
+
+voiceSel.addEventListener("change", function(){
+  saveLocal();
+  if (state !== "disconnected") reconnect("voice → " + voiceSel.value);
+});
+
+personaEl.addEventListener("input", function(){
+  saveLocal();
+  if (state !== "disconnected"){
+    personaHint.className = "hint warn";
+    personaHint.textContent = "Persona edited — hit Apply / Restart to use it.";
+  }
+});
+
+function sendText(){
+  var v = textIn.value.trim();
+  if (!v) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN){
+    showError("Not connected — cannot send text.");
+    return;
+  }
+  ws.send(JSON.stringify({ type: "text", text: v }));
+  onTranscript("user", (lastRole === "user" ? " " : "") + v);
+  lastRole = null; lastTxt = null;
+  textIn.value = "";
+}
+
+sendBtn.addEventListener("click", sendText);
+textIn.addEventListener("keydown", function(e){
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); sendText(); }
+});
+
+clearBtn.addEventListener("click", function(){
+  transcriptEl.innerHTML = '<div class="empty">no transcript yet — connect and say something.</div>';
+  lastRole = null; lastTxt = null;
+});
+
+window.addEventListener("beforeunload", function(){ try { hardReset(); } catch(e){} });
+
+/* ------------------------------------------------------------------ *
+ * render loop: meter + speaking/listening state
+ * ------------------------------------------------------------------ */
+
+function tick(){
+  if (analyser && analyserBuf){
+    if (analyser.getFloatTimeDomainData) analyser.getFloatTimeDomainData(analyserBuf);
+    var sum = 0;
+    for (var i = 0; i < analyserBuf.length; i++){ var s = analyserBuf[i]; sum += s * s; }
+    micRms = Math.sqrt(sum / analyserBuf.length);
+    micSmooth = Math.max(micRms, micSmooth * 0.82);
+    var pct = Math.min(100, Math.round(micSmooth * 380));
+    meterBar.style.width = pct + "%";
+  }
+
+  if (state !== "disconnected" && state !== "connecting"){
+    if (isSpeaking()) setState("speaking");
+    else if (readyForAudio && micSmooth > 0.022) setState("listening");
+    else if (readyForAudio) setState("ready");
+  }
+
+  var live = (state !== "disconnected" && state !== "connecting" && !!ws);
+  if (textIn.disabled === live){ textIn.disabled = !live; sendBtn.disabled = !live; }
+
+  updateStats();
+  requestAnimationFrame(tick);
+}
+
+/* ------------------------------------------------------------------ *
+ * boot
+ * ------------------------------------------------------------------ */
+
+personaEl.value = loadLocal("voicelab.persona", DEFAULT_PERSONA) || DEFAULT_PERSONA;
+loadVoices();
+setState("disconnected");
+statusText.textContent = "disconnected";
+updateStats();
+requestAnimationFrame(tick);
+
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+  showError("This browser has no getUserMedia. Open the page over http://localhost:8000 (not file://) in Chrome/Edge/Firefox.");
+}
+if (!window.AudioWorkletNode){
+  showError("AudioWorklet is not supported in this browser — mic capture will not work.");
+}
+</script>
+</body>
+</html>

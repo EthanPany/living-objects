@@ -1,0 +1,27 @@
+# --- SECRETS: never commit ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# Generated voice previews (binary, regenerable via preview_voices.py)
+voice_samples/
+*.wav
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

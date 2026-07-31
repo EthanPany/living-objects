@@ -278,7 +278,12 @@ function edges(env,t){
   }
 }
 
-/* GLOBE — it speaking. A dithered disc swelling behind the face. */
+/* GLOBE — it speaking. A dithered disc swelling behind the face.
+   GLOBE_MAX is deliberately below 1.0. The final blit quantises to four levels
+   (floor(v*3+dither)/3), so a globe allowed to reach 1.0 lands on the SAME level
+   as the face and the nose vanishes into it. Capping at ~0.5 pins the globe to
+   the middle levels and keeps the face solid on top of it. */
+var GLOBE_MAX = 0.50;
 function globe(level){
   if(level<=0.01) return;
   var cx=W/2, cy=H*0.40, rr=Math.min(W,H)*(0.16+level*0.20);
@@ -288,7 +293,7 @@ function globe(level){
       if(d>1) continue;
       var f=(1-d)*(1-d)*(0.35+level*0.65);
       var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
-      if(f>thr*0.55) px(x,y,Math.min(1,f*1.5));
+      if(f>thr*0.55) px(x,y,Math.min(GLOBE_MAX,f*1.5));
     }
   }
 }
@@ -357,26 +362,42 @@ function camFull(){
    things are black" layer — and it is why the render loop never needs the
    model: motion is a local computation at 60fps, vision is 1fps elsewhere. */
 var MOTION_GAIN=6.0, MOTION_DECAY=0.90, MOTION_FLOOR=0.055;
-function camMotion(weight){
-  var L=lumaNow();
-  if(!L) return 0;
-  var total=0;
-  for(var i=0;i<W*H;i++){
-    var d=Math.abs(L[i]-prevLuma[i]);
-    if(d<0.035) d=0;                          /* sensor noise floor */
-    var v=Math.min(1,d*MOTION_GAIN);
-    total+=v;
-    var h=heat[i]*MOTION_DECAY;
-    heat[i]= v>h ? v : h;
-    if(heat[i]>MOTION_FLOOR){
-      var y=(i/W)|0, x=i-y*W;
-      var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
-      var hv=heat[i]*weight;
-      if(hv>thr*0.5) px(x,y,Math.min(1,hv));
+/* getImageData is a GPU->CPU sync stall — the single most expensive thing in the
+   frame — and it runs on the same thread that schedules incoming audio. At 60fps
+   it was stalling often enough to delay playback scheduling and make audio choppy.
+   Sample the camera at ~30fps instead; heat still decays and redraws every frame,
+   so the trails look identical. */
+var MOTION_SAMPLE_MS=33, lastSample=0, lastMotion=0;
+
+function camMotion(weight, now){
+  var sample = (now-lastSample) >= MOTION_SAMPLE_MS;
+  if(sample){
+    var L=lumaNow();
+    if(L){
+      lastSample=now;
+      var total=0;
+      for(var i=0;i<W*H;i++){
+        var d=Math.abs(L[i]-prevLuma[i]);
+        if(d<0.035) d=0;                        /* sensor noise floor */
+        var v=Math.min(1,d*MOTION_GAIN);
+        total+=v;
+        if(v>heat[i]) heat[i]=v;
+      }
+      prevLuma.set(L);
+      lastMotion=total/(W*H);
     }
   }
-  prevLuma.set(L);
-  return total/(W*H);
+  /* decay + draw every frame regardless, so trails stay smooth at 60fps */
+  for(var j=0;j<W*H;j++){
+    var h=heat[j];
+    if(h<=MOTION_FLOOR){ heat[j]=h*MOTION_DECAY; continue; }
+    heat[j]=h*MOTION_DECAY;
+    var y=(j/W)|0, x=j-y*W;
+    var thr=(BAYER[(y&3)*4+(x&3)]+0.5)/16;
+    var hv=h*weight;
+    if(hv>thr*0.5) px(x,y,Math.min(1,hv));
+  }
+  return lastMotion;
 }
 
 /* ------------------------------------------------------------------ *
@@ -454,6 +475,20 @@ function ensurePlayback(){
   playGain.connect(outAnalyser); outAnalyser.connect(playCtx.destination);
   nextStart=0;
 }
+/* Adaptive jitter buffer.
+   Mean latency to the model is fine; ARRIVAL TIMING is not. This link measured
+   ±194ms of jitter with spikes past 870ms, so chunks land in bursts and gaps.
+   Scheduling each chunk ~immediately means the queue runs dry between bursts and
+   you hear it as choppy audio.
+
+   So hold a cushion. Start at PREROLL_MIN, and every time the queue actually
+   drains mid-utterance (a real underrun) grow the cushion a little, up to
+   PREROLL_MAX. It settles at whatever this particular network needs and stays
+   there. Cost is a few hundred ms before it starts talking; benefit is that it
+   doesn't stutter once it does. */
+var PREROLL_MIN=0.18, PREROLL_MAX=0.60, PREROLL_STEP=0.06;
+var preroll=PREROLL_MIN, underruns=0;
+
 function enqueuePcm(ab){
   ensurePlayback();
   if(playCtx.state==="suspended") playCtx.resume();
@@ -463,7 +498,16 @@ function enqueuePcm(ab){
   b.copyToChannel(f,0);
   var s=playCtx.createBufferSource(); s.buffer=b; s.connect(playGain);
   var now=playCtx.currentTime;
-  if(nextStart<now+0.02) nextStart=now+0.08;
+
+  if(nextStart<now+0.02){
+    /* nothing queued ahead of us. Mid-utterance that is an underrun -- the
+       gap was audible -- so widen the cushion for next time. */
+    if(activeSrc.size>0 || nextStart>0){
+      underruns++;
+      if(preroll<PREROLL_MAX) preroll=Math.min(PREROLL_MAX,preroll+PREROLL_STEP);
+    }
+    nextStart=now+preroll;
+  }
   s.start(nextStart); nextStart+=b.duration;
   activeSrc.add(s);
   s.onended=function(){ activeSrc.delete(s); };
@@ -736,7 +780,7 @@ function loop(now){
   }
   else if(step==="alive"){
     /* the room, but only the parts of it that moved */
-    var motion=camMotion(0.62);
+    var motion=camMotion(0.62, now);
     if(motion>0.055 && mode!=="speaking") mode="startled";
     edges(micSmooth*1.25, t);                       /* you */
     globe(outSmooth);                               /* it */
@@ -744,8 +788,11 @@ function loop(now){
     face(outSmooth);
     /* HUD */
     var s=Math.floor((now-aliveStart)/1000);
+    /* buffer/underruns shown on purpose — if audio ever sounds choppy this line
+       says whether the jitter buffer is still hunting for the right size */
     $("uptime").textContent="uptime "+String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")
-      +" · "+framesSent+" frames";
+      +" · "+framesSent+" frames · buf "+Math.round(preroll*1000)+"ms"
+      +(underruns?" · "+underruns+" drops":"");
     $("stateLabel").textContent=MODES[mode].label;
     $("stateHint").textContent=MODES[mode].hint;
     $("line").textContent=curLine;

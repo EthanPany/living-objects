@@ -304,7 +304,11 @@ def build_live_config(voice: str, system_instruction: str) -> types.LiveConnectC
                 start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
                 end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
                 prefix_padding_ms=300,
-                silence_duration_ms=1200,
+                # 1200ms read as lag rather than patience -- it is dead air after you
+                # stop talking, before it has even started thinking. 900 keeps the
+                # unhurried feel and gives back a third of a second. Raise it if it
+                # starts interrupting your pauses.
+                silence_duration_ms=900,
             ),
             activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
         ),
